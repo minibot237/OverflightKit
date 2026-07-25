@@ -179,9 +179,16 @@ public struct Config: Codable, Sendable, Equatable {
 	public var unifiedDbPath: String
 	/// Optional wide-area coarse sweep.
 	public var sweep: SweepConfig?
+	/// Where nightly compaction parks Parquet partitions. SSD placeholder
+	/// today; point at the spinning disk when it arrives.
+	public var archiveDir: String
 
 	public var expandedUnifiedDbPath: String {
 		(unifiedDbPath as NSString).expandingTildeInPath
+	}
+
+	public var expandedArchiveDir: String {
+		(archiveDir as NSString).expandingTildeInPath
 	}
 
 	enum CodingKeys: String, CodingKey {
@@ -190,6 +197,7 @@ public struct Config: Codable, Sendable, Equatable {
 		case primarySource = "primary_source"
 		case fallbackSource = "fallback_source"
 		case unifiedDbPath = "unified_db_path"
+		case archiveDir = "archive_dir"
 	}
 
 	private enum LegacyKeys: String, CodingKey {
@@ -210,13 +218,14 @@ public struct Config: Codable, Sendable, Equatable {
 		}
 	}
 
-	public init(pollIntervalS: Double, primarySource: String, fallbackSource: String, sites: [SiteConfig], unifiedDbPath: String = UnifiedStore.defaultPath, sweep: SweepConfig? = nil) {
+	public init(pollIntervalS: Double, primarySource: String, fallbackSource: String, sites: [SiteConfig], unifiedDbPath: String = UnifiedStore.defaultPath, sweep: SweepConfig? = nil, archiveDir: String = "~/.overflight/archive") {
 		self.pollIntervalS = pollIntervalS
 		self.primarySource = primarySource
 		self.fallbackSource = fallbackSource
 		self.sites = sites
 		self.unifiedDbPath = unifiedDbPath
 		self.sweep = sweep
+		self.archiveDir = archiveDir
 	}
 
 	public init(from decoder: Decoder) throws {
@@ -227,6 +236,7 @@ public struct Config: Codable, Sendable, Equatable {
 		fallbackSource = try c.decodeIfPresent(String.self, forKey: .fallbackSource) ?? d.fallbackSource
 		unifiedDbPath = try c.decodeIfPresent(String.self, forKey: .unifiedDbPath) ?? UnifiedStore.defaultPath
 		sweep = try c.decodeIfPresent(SweepConfig.self, forKey: .sweep)
+		archiveDir = try c.decodeIfPresent(String.self, forKey: .archiveDir) ?? "~/.overflight/archive"
 		if let decoded = try c.decodeIfPresent([SiteConfig].self, forKey: .sites), !decoded.isEmpty {
 			sites = decoded
 			return

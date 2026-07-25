@@ -71,18 +71,90 @@ func JSONString(_ s: String) -> String {
 	return String(arr.dropFirst().dropLast())
 }
 
+/// Reads Parquet partitions the nightly compactor wrote, via the duckdb CLI.
+/// Every value interpolated into the SQL is a Swift Double/Int64 or a
+/// VehicleKind rawValue — nothing user-typed reaches the string.
+struct ArchiveQuery {
+	let archiveDir: String
+	let duckdbPath: String?
+
+	init(archiveDir: String) {
+		self.archiveDir = archiveDir
+		let candidates = ["/opt/homebrew/bin/duckdb", "/usr/local/bin/duckdb"]
+		duckdbPath = candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+	}
+
+	var available: Bool {
+		duckdbPath != nil && FileManager.default.fileExists(atPath: archiveDir)
+	}
+
+	func observations(
+		latMin: Double, latMax: Double, lonMin: Double, lonMax: Double,
+		from: Int64, to: Int64, kinds: [VehicleKind], limit: Int
+	) throws -> [UnifiedObservation] {
+		guard let duckdbPath, available else { return [] }
+		let kindList = kinds.map { "'\($0.rawValue)'" }.joined(separator: ",")
+		let sql = """
+			SELECT kind, vid, ts, lat, lon, alt_ft, alt_src, speed_kt, heading, callsign, source, geohash
+			FROM read_parquet('\(archiveDir)/date=*/geo=*/*.parquet', hive_partitioning=1)
+			WHERE ts >= \(from) AND ts <= \(to)
+				AND lat >= \(latMin) AND lat <= \(latMax)
+				AND lon >= \(lonMin) AND lon <= \(lonMax)
+				AND kind IN (\(kindList))
+			ORDER BY kind, vid, ts
+			LIMIT \(limit);
+			"""
+		let proc = Process()
+		proc.executableURL = URL(fileURLWithPath: duckdbPath)
+		proc.arguments = ["-json", "-c", sql]
+		let out = Pipe()
+		proc.standardOutput = out
+		proc.standardError = Pipe()
+		try proc.run()
+		let data = out.fileHandleForReading.readDataToEndOfFile()
+		proc.waitUntilExit()
+		guard proc.terminationStatus == 0, !data.isEmpty else { return [] }
+
+		struct Row: Decodable {
+			var kind: String
+			var vid: String
+			var ts: Int64
+			var lat: Double
+			var lon: Double
+			var alt_ft: Double?
+			var alt_src: String?
+			var speed_kt: Double?
+			var heading: Double?
+			var callsign: String?
+			var source: String
+			var geohash: String
+		}
+		let rows = try JSONDecoder().decode([Row].self, from: data)
+		return rows.compactMap { r in
+			guard let kind = VehicleKind(rawValue: r.kind) else { return nil }
+			return UnifiedObservation(
+				kind: kind, vid: r.vid, ts: r.ts, lat: r.lat, lon: r.lon,
+				altFt: r.alt_ft, altSrc: r.alt_src, speedKt: r.speed_kt,
+				headingDeg: r.heading, callsign: r.callsign,
+				source: r.source, geohash: r.geohash)
+		}
+	}
+}
+
 /// Query API over the unified store. Read-only; every parameter is parsed
 /// into a number or a known enum before it goes anywhere near SQL.
 actor QueryAPI {
 	let config: Config
 	let store: UnifiedStore
 	let webRoot: String
+	let archive: ArchiveQuery
 	let encoder: JSONEncoder
 
 	init(config: Config, store: UnifiedStore, webRoot: String) {
 		self.config = config
 		self.store = store
 		self.webRoot = webRoot
+		archive = ArchiveQuery(archiveDir: config.expandedArchiveDir)
 		encoder = JSONEncoder()
 	}
 
@@ -176,8 +248,8 @@ actor QueryAPI {
 		let now = Int64(Date().timeIntervalSince1970)
 		let from = req.query["from"].flatMap { Int64($0) } ?? now - 3600
 		let to = req.query["to"].flatMap { Int64($0) } ?? now
-		guard from <= to, to - from <= 7 * 86400 else {
-			return .badRequest("window must be positive and at most 7 days for live queries")
+		guard from <= to, to - from <= 31 * 86400 else {
+			return .badRequest("window must be positive and at most 31 days")
 		}
 		var kinds: [VehicleKind]?
 		if let k = req.query["kinds"] {
@@ -189,10 +261,24 @@ actor QueryAPI {
 		let gap = min(max(req.query["gap"].flatMap { Int64($0) } ?? 300, 30), 3600)
 
 		do {
-			let obs = try await store.observations(
+			var obs = try await store.observations(
 				latMin: latMin, latMax: latMax, lonMin: lonMin, lonMax: lonMax,
 				from: from, to: to, kinds: kinds, limit: limit)
-			let truncated = obs.count == limit
+			// Anything older than the hot tier lives in Parquet. The compactor
+			// prunes only verified days, so the two tiers never overlap.
+			let hotFirst = try await store.observationTimeBounds()?.first ?? now
+			if from < hotFirst, archive.available {
+				let cold = try archive.observations(
+					latMin: latMin, latMax: latMax, lonMin: lonMin, lonMax: lonMax,
+					from: from, to: min(to, hotFirst - 1),
+					kinds: kinds ?? VehicleKind.allCases, limit: limit)
+				if !cold.isEmpty {
+					obs = (cold + obs).sorted {
+						($0.kind.rawValue, $0.vid, $0.ts) < ($1.kind.rawValue, $1.vid, $1.ts)
+					}
+				}
+			}
+			let truncated = obs.count >= limit
 			if raw {
 				struct Row: Encodable {
 					var kind: String
