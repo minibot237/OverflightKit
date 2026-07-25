@@ -173,16 +173,43 @@ Record every verified fact back into this file (or the memory scope) with date.
 - Phase 1 - Unified store + ingest. New schema, collectors write to it,
   migrate the three site DBs in, sites become saved views. Query API skeleton
   (Tailscale-only) with bbox + window queries against the ingest tier.
+  STATUS 2026-07-25: DONE. UnifiedStore (kind/vid/geohash schema) in core,
+  site collectors dual-write (site DBs stay for the native viewer), all
+  three site DBs migrated, OverflightServer on :9200 with /api/health,
+  /api/views, /api/tracks, /api/observations.
 - Phase 2 - Wide-area sweep. Run the source probes (above), pick adsb.lol
   tiling and/or OpenSky, implement the coarse layer, start archiving CONUS.
   Nightly Parquet compaction to spinning disk; DuckDB query path in the API.
+  STATUS 2026-07-25: DONE and running. Probes found adsb.lol has NO radius
+  cap - the sweep is ONE 1300nm request/60s (~6.3k aircraft/tick), tiling
+  only exists as the airplanes.live failover (250nm hard cap there).
+  Compaction nightly 03:30 Pacific to zstd Parquet (date + 2-char geohash
+  partitions), verify-then-prune, archive on SSD until spinning disk.
+  API transparently merges archive rows via duckdb.
 - Phase 3 - Focus lens fleet. Top-X airport list at 10s, budgeted politely
   alongside the sweep.
+  STATUS 2026-07-25: DONE. Per-site source/interval overrides; the 7 East
+  Coast candidates (KJFK KLGA KEWR KBOS KPHL KDCA KATL) run at 12s against
+  airplanes.live's documented 1 req/s budget (0.58 req/s), leaving adsb.lol
+  load unchanged. List is still Eric's to trim.
 - Phase 4 - Web time machine UI. Map + scrubber + filters, served by minibot,
   reachable over Tailscale from iPad/Mac. Basemap decision here.
+  STATUS 2026-07-25: DONE (v1). Single-file web/index.html at /: Leaflet +
+  OSM raster (basemap decision still open - Protomaps self-host is the
+  candidate), date/time pickers, presets, play/scrub with interpolated
+  dots + 30min comet trails, altitude-band colors, kind filters, health
+  footer. Tailscale not yet on minibot, so the server binds loopback.
 - Phase 5 - Ships. AISStream live collector (kind=vessel) + NOAA historical
   backfill loader. Same store, same viewer.
+  STATUS 2026-07-25: BUILT. Live AIS loop ready but parked until Eric signs
+  up for a free aisstream.io key (ais.api_key in config; agent installs
+  itself once present). NOAA backfill proven: 2025-01-01 loaded, 7.34M
+  vessel rows straight to archive Parquet, queryable through the API
+  (marine queries want &gap=1800+, anchored ships report sporadically).
 - Phase 6 - Rail, opportunistic. Amtrak + GTFS-RT adapters where feeds exist.
+  STATUS 2026-07-25: Amtrak DONE and running (Amtraker, 60s, kind=train,
+  ~57 trains/poll incl. VIA). GTFS-RT adapters not built; MBTA and MTA LIRR
+  verified keyless if ever wanted.
 
 Phases land in order but need not be fully sequential - e.g. ship probes can
 run during Phase 2. Keep commits small and pushed; Eric and desktop sessions
