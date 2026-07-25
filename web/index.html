@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overflight Time Machine</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+	:root { color-scheme: dark; }
+	* { box-sizing: border-box; }
+	html, body { margin: 0; height: 100%; font-family: -apple-system, system-ui, sans-serif; font-size: 16px; }
+	#map { position: absolute; inset: 0; background: #111; }
+	#panel {
+		position: absolute; top: 12px; left: 12px; z-index: 1000;
+		background: rgba(18, 20, 26, 0.92); color: #e8e8ea;
+		border: 1px solid #333; border-radius: 10px;
+		padding: 12px 14px; width: 330px; max-height: calc(100% - 24px);
+		overflow-y: auto; backdrop-filter: blur(6px);
+	}
+	#panel h1 { font-size: 17px; margin: 0 0 8px; letter-spacing: 0.3px; }
+	#panel h1 small { color: #8a8f98; font-weight: normal; font-size: 12px; }
+	.row { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+	.row label { color: #aab; font-size: 14px; }
+	select, input[type="date"], input[type="time"], button {
+		background: #23262e; color: #e8e8ea; border: 1px solid #3a3f4a;
+		border-radius: 6px; padding: 6px 8px; font-size: 14px;
+	}
+	button { cursor: pointer; }
+	button:hover { background: #2d313b; }
+	button.primary { background: #2456c4; border-color: #2f62d6; }
+	button.primary:hover { background: #2c61d4; }
+	.presets button { padding: 4px 8px; font-size: 13px; }
+	.kinds label { margin-right: 10px; font-size: 14px; user-select: none; }
+	#scrub { width: 100%; }
+	#status { color: #8a8f98; font-size: 13px; min-height: 18px; }
+	#health { color: #6f7580; font-size: 12px; border-top: 1px solid #2a2d34; margin-top: 8px; padding-top: 8px; white-space: pre-line; }
+	#windowLabel { font-variant-numeric: tabular-nums; font-size: 14px; color: #cfd3da; }
+	.legend { font-size: 12px; color: #8a8f98; }
+	.legend span { display: inline-block; width: 10px; height: 10px; border-radius: 5px; margin: 0 3px 0 8px; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="panel">
+	<h1>Overflight Time Machine <small>minibot archive</small></h1>
+	<div class="row">
+		<label>View</label>
+		<select id="views"><option value="">— free pan —</option></select>
+		<button id="load" class="primary">Load window</button>
+	</div>
+	<div class="row">
+		<input type="date" id="date">
+		<input type="time" id="t0" value="00:00">
+		<span>→</span>
+		<input type="time" id="t1" value="23:59">
+	</div>
+	<div class="row presets">
+		<button data-mins="60">last hour</button>
+		<button data-mins="360">last 6h</button>
+		<button data-mins="1440">last 24h</button>
+		<button id="live">live</button>
+	</div>
+	<div class="row kinds">
+		<label><input type="checkbox" id="kAircraft" checked> aircraft</label>
+		<label><input type="checkbox" id="kVessel" checked> ships</label>
+		<label><input type="checkbox" id="kTrain" checked> trains</label>
+	</div>
+	<div class="row">
+		<input type="range" id="scrub" min="0" max="1000" value="1000">
+	</div>
+	<div class="row">
+		<button id="play">▶</button>
+		<span id="windowLabel"></span>
+	</div>
+	<div id="status"></div>
+	<div class="legend">
+		alt: <span style="background:#4fc3f7"></span>&lt;5k
+		<span style="background:#81c784"></span>5–10k
+		<span style="background:#ffd54f"></span>10–20k
+		<span style="background:#ff8a65"></span>20k+
+		<span style="background:#b39ddb"></span>ship
+		<span style="background:#f48fb1"></span>train
+	</div>
+	<div id="health">loading health…</div>
+</div>
+<script>
+"use strict";
+const map = L.map("map", { zoomControl: true }).setView([39.5, -98.35], 4);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+	maxZoom: 19,
+	attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+}).addTo(map);
+
+const $ = (id) => document.getElementById(id);
+const trackLayer = L.layerGroup().addTo(map);
+const dotLayer = L.layerGroup().addTo(map);
+
+let tracks = [];          // fetched tracks for the loaded window
+let windowFrom = 0, windowTo = 0;
+let playTimer = null;
+
+function altColor(kind, alt) {
+	if (kind === "vessel") return "#b39ddb";
+	if (kind === "train") return "#f48fb1";
+	if (alt == null) return "#90a4ae";
+	if (alt < 5000) return "#4fc3f7";
+	if (alt < 10000) return "#81c784";
+	if (alt < 20000) return "#ffd54f";
+	return "#ff8a65";
+}
+
+function fmtTs(ts) {
+	return new Date(ts * 1000).toLocaleString("en-US", {
+		timeZone: "America/Los_Angeles",
+		month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+	});
+}
+
+function selectedKinds() {
+	const kinds = [];
+	if ($("kAircraft").checked) kinds.push("aircraft");
+	if ($("kVessel").checked) kinds.push("vessel");
+	if ($("kTrain").checked) kinds.push("train");
+	return kinds;
+}
+
+async function loadWindow(from, to) {
+	windowFrom = from; windowTo = to;
+	const b = map.getBounds();
+	const bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()]
+		.map((v) => v.toFixed(4)).join(",");
+	const kinds = selectedKinds();
+	if (!kinds.length) { $("status").textContent = "pick at least one kind"; return; }
+	$("status").textContent = "loading…";
+	try {
+		const url = `/api/tracks?bbox=${bbox}&from=${from}&to=${to}&kinds=${kinds.join(",")}`;
+		const resp = await fetch(url);
+		const data = await resp.json();
+		if (data.error) { $("status").textContent = data.error; return; }
+		tracks = data.tracks;
+		$("status").textContent =
+			`${data.count.toLocaleString()} points, ${tracks.length.toLocaleString()} tracks` +
+			(data.truncated ? " — TRUNCATED, narrow the view" : "");
+		$("scrub").value = 1000;
+		render();
+	} catch (e) {
+		$("status").textContent = "fetch failed: " + e;
+	}
+}
+
+// Scrub position → time cursor; show track history up to the cursor and a
+// position dot interpolated at the cursor.
+function render() {
+	const frac = Number($("scrub").value) / 1000;
+	const cursor = windowFrom + (windowTo - windowFrom) * frac;
+	$("windowLabel").textContent = fmtTs(cursor);
+	trackLayer.clearLayers();
+	dotLayer.clearLayers();
+	const trailStart = cursor - 30 * 60;   // 30-minute comet trail
+
+	for (const t of tracks) {
+		const pts = t.points;
+		if (!pts.length || pts[0][0] > cursor) continue;
+		const seg = [];
+		let last = null, next = null;
+		for (const p of pts) {
+			if (p[0] > cursor) { next = p; break; }
+			last = p;
+			if (p[0] >= trailStart) seg.push([p[1], p[2]]);
+		}
+		if (!last) continue;
+		const color = altColor(t.kind, last[3]);
+		if (seg.length > 1) {
+			L.polyline(seg, { color, weight: 1.5, opacity: 0.75 }).addTo(trackLayer);
+		}
+		// Interpolate between the samples either side of the cursor so dots
+		// move smoothly while scrubbing.
+		let [ts, lat, lon] = [last[0], last[1], last[2]];
+		if (next && next[0] > last[0]) {
+			const f = (cursor - last[0]) / (next[0] - last[0]);
+			if (f > 0 && f <= 1) {
+				lat = last[1] + (next[1] - last[1]) * f;
+				lon = last[2] + (next[2] - last[2]) * f;
+			}
+		}
+		if (cursor - ts <= 15 * 60) {
+			const m = L.circleMarker([lat, lon], {
+				radius: 4, color, fillColor: color, fillOpacity: 0.9, weight: 1,
+			}).addTo(dotLayer);
+			const alt = last[3] != null ? Math.round(last[3]).toLocaleString() + " ft" : "";
+			const spd = last[4] != null ? Math.round(last[4]) + " kt" : "";
+			m.bindPopup(`<b>${t.callsign || t.vid}</b><br>${t.kind} ${t.vid}<br>${alt} ${spd}<br>${fmtTs(last[0])}`);
+		}
+	}
+}
+
+function pacificDayBounds(dateStr, t0Str, t1Str) {
+	// Interpret the pickers in the machine's locale (server and UI both live
+	// in Pacific for this project).
+	const from = Math.floor(new Date(`${dateStr}T${t0Str}:00`).getTime() / 1000);
+	const to = Math.floor(new Date(`${dateStr}T${t1Str}:59`).getTime() / 1000);
+	return [from, to];
+}
+
+$("load").onclick = () => {
+	const [from, to] = pacificDayBounds($("date").value, $("t0").value, $("t1").value);
+	if (!(from < to)) { $("status").textContent = "bad time range"; return; }
+	loadWindow(from, to);
+};
+
+document.querySelectorAll(".presets button[data-mins]").forEach((b) => {
+	b.onclick = () => {
+		const now = Math.floor(Date.now() / 1000);
+		loadWindow(now - Number(b.dataset.mins) * 60, now);
+	};
+});
+
+$("live").onclick = () => {
+	const now = Math.floor(Date.now() / 1000);
+	loadWindow(now - 10 * 60, now);
+};
+
+$("scrub").oninput = render;
+
+$("play").onclick = () => {
+	if (playTimer) {
+		clearInterval(playTimer);
+		playTimer = null;
+		$("play").textContent = "▶";
+		return;
+	}
+	if (Number($("scrub").value) >= 1000) $("scrub").value = 0;
+	$("play").textContent = "⏸";
+	playTimer = setInterval(() => {
+		const v = Number($("scrub").value) + 2;
+		$("scrub").value = Math.min(v, 1000);
+		render();
+		if (v >= 1000) { clearInterval(playTimer); playTimer = null; $("play").textContent = "▶"; }
+	}, 100);
+};
+
+async function loadViews() {
+	try {
+		const views = await (await fetch("/api/views")).json();
+		for (const v of views) {
+			const o = document.createElement("option");
+			o.value = JSON.stringify([v.lat, v.lon, v.radius_nm]);
+			o.textContent = v.title;
+			$("views").appendChild(o);
+		}
+	} catch {}
+}
+$("views").onchange = (e) => {
+	if (!e.target.value) return;
+	const [lat, lon, radiusNm] = JSON.parse(e.target.value);
+	map.fitBounds(L.latLng(lat, lon).toBounds(radiusNm * 1852 * 2));
+};
+
+async function refreshHealth() {
+	try {
+		const h = await (await fetch("/api/health")).json();
+		const stale = h.now - (h.lastTs ?? 0);
+		const lines = h.collectors.map((c) =>
+			`${c.collector}: ${c.vehiclesLastPoll} last poll, ${c.errorsLastHour} errs/hr`);
+		$("health").textContent =
+			`data ${stale < 120 ? "fresh" : Math.round(stale / 60) + "m stale"}, db ${(h.dbBytes / 1048576).toFixed(0)}MB\n` +
+			lines.join("\n");
+	} catch {
+		$("health").textContent = "api unreachable";
+	}
+}
+
+const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+$("date").value = today;
+loadViews();
+refreshHealth();
+setInterval(refreshHealth, 30000);
+$("live").click();
+</script>
+</body>
+</html>
