@@ -57,6 +57,11 @@ final class Database {
 	var lastInsertRowID: Int64 {
 		sqlite3_last_insert_rowid(handle)
 	}
+
+	/// Rows affected by the most recent INSERT/UPDATE/DELETE.
+	var changes: Int {
+		Int(sqlite3_changes64(handle))
+	}
 }
 
 final class Statement {
