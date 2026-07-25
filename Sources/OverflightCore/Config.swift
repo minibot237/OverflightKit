@@ -98,6 +98,75 @@ public struct SiteConfig: Codable, Sendable, Equatable, Identifiable {
 	}
 }
 
+/// The wide-area coarse layer: one big circle polled slowly, the surfable
+/// archive under the focus sites. Verified 2026-07-25: adsb.lol serves a
+/// 1300nm point query (all of CONUS) in one ~3MB response, so the default
+/// sweep is a single request per tick. The fallback source caps radius at
+/// 250nm, so on failover the sweep tiles the circle instead.
+public struct SweepConfig: Codable, Sendable, Equatable {
+	public var slug: String
+	public var lat: Double
+	public var lon: Double
+	public var radiusNm: Double
+	public var intervalS: Double
+	public var enabled: Bool
+
+	enum CodingKeys: String, CodingKey {
+		case slug, lat, lon, enabled
+		case radiusNm = "radius_nm"
+		case intervalS = "interval_s"
+	}
+
+	public init(slug: String, lat: Double, lon: Double, radiusNm: Double, intervalS: Double = 60, enabled: Bool = true) {
+		self.slug = slug
+		self.lat = lat
+		self.lon = lon
+		self.radiusNm = radiusNm
+		self.intervalS = intervalS
+		self.enabled = enabled
+	}
+
+	public init(from decoder: Decoder) throws {
+		let c = try decoder.container(keyedBy: CodingKeys.self)
+		slug = try c.decodeIfPresent(String.self, forKey: .slug) ?? "conus"
+		lat = try c.decode(Double.self, forKey: .lat)
+		lon = try c.decode(Double.self, forKey: .lon)
+		radiusNm = try c.decodeIfPresent(Double.self, forKey: .radiusNm) ?? 1300
+		intervalS = try c.decodeIfPresent(Double.self, forKey: .intervalS) ?? 60
+		enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+	}
+
+	public var collectorLabel: String { "sweep-\(slug)" }
+
+	/// Offset-lattice tile centers that cover this circle with `tileRadiusNm`
+	/// circles. Cell 1.4r x 1.2r with alternate rows offset puts the worst
+	/// gap point ~0.92r from a center — margin for lat/lon distortion.
+	public func fallbackTiles(tileRadiusNm: Double = 250) -> [(lat: Double, lon: Double)] {
+		let lonPitchNm = tileRadiusNm * 1.4
+		let latStep = tileRadiusNm * 1.2 / 60
+		var tiles: [(lat: Double, lon: Double)] = []
+		var row = 0
+		var tileLat = lat - radiusNm / 60
+		while tileLat <= lat + radiusNm / 60 + latStep / 2 {
+			let clampedLat = max(-85.0, min(85.0, tileLat))
+			let lonStep = lonPitchNm / (60 * cos(clampedLat * .pi / 180))
+			let offset = row % 2 == 0 ? 0 : lonStep / 2
+			let halfWidth = radiusNm / (60 * cos(clampedLat * .pi / 180))
+			var tileLon = lon - halfWidth + offset
+			while tileLon <= lon + halfWidth + lonStep / 2 {
+				let d = Geo.distanceM(lat1: lat, lon1: lon, lat2: clampedLat, lon2: tileLon) / Geo.metersPerNm
+				if d <= radiusNm + tileRadiusNm {
+					tiles.append((clampedLat, tileLon))
+				}
+				tileLon += lonStep
+			}
+			row += 1
+			tileLat += latStep
+		}
+		return tiles
+	}
+}
+
 /// Global settings plus the site list, at ~/.overflight/config.json.
 /// A legacy single-site file (top-level `site`/`parcel`/`db_path` keys)
 /// decodes into a one-element site list, preserving its database path.
@@ -108,13 +177,15 @@ public struct Config: Codable, Sendable, Equatable {
 	public var sites: [SiteConfig]
 	/// The unified two-tier ingest database every collector appends to.
 	public var unifiedDbPath: String
+	/// Optional wide-area coarse sweep.
+	public var sweep: SweepConfig?
 
 	public var expandedUnifiedDbPath: String {
 		(unifiedDbPath as NSString).expandingTildeInPath
 	}
 
 	enum CodingKeys: String, CodingKey {
-		case sites
+		case sites, sweep
 		case pollIntervalS = "poll_interval_s"
 		case primarySource = "primary_source"
 		case fallbackSource = "fallback_source"
@@ -139,12 +210,13 @@ public struct Config: Codable, Sendable, Equatable {
 		}
 	}
 
-	public init(pollIntervalS: Double, primarySource: String, fallbackSource: String, sites: [SiteConfig], unifiedDbPath: String = UnifiedStore.defaultPath) {
+	public init(pollIntervalS: Double, primarySource: String, fallbackSource: String, sites: [SiteConfig], unifiedDbPath: String = UnifiedStore.defaultPath, sweep: SweepConfig? = nil) {
 		self.pollIntervalS = pollIntervalS
 		self.primarySource = primarySource
 		self.fallbackSource = fallbackSource
 		self.sites = sites
 		self.unifiedDbPath = unifiedDbPath
+		self.sweep = sweep
 	}
 
 	public init(from decoder: Decoder) throws {
@@ -154,6 +226,7 @@ public struct Config: Codable, Sendable, Equatable {
 		primarySource = try c.decodeIfPresent(String.self, forKey: .primarySource) ?? d.primarySource
 		fallbackSource = try c.decodeIfPresent(String.self, forKey: .fallbackSource) ?? d.fallbackSource
 		unifiedDbPath = try c.decodeIfPresent(String.self, forKey: .unifiedDbPath) ?? UnifiedStore.defaultPath
+		sweep = try c.decodeIfPresent(SweepConfig.self, forKey: .sweep)
 		if let decoded = try c.decodeIfPresent([SiteConfig].self, forKey: .sites), !decoded.isEmpty {
 			sites = decoded
 			return

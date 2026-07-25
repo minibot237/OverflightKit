@@ -232,6 +232,8 @@ struct OverflightCollectorMain {
 		                                                      print histograms + coverage diagnostic
 		  OverflightCollector --list-sites                    print configured sites
 		  OverflightCollector --migrate SLUG                  copy a site DB into the unified store
+		  OverflightCollector --sweep                         run the wide-area sweep loop
+		  OverflightCollector --sweep-check                   print sweep label if configured+enabled
 
 		--site defaults to the first configured site; config defaults to
 		\(Config.defaultPath) and is created with KGMJ defaults if missing.
@@ -248,10 +250,16 @@ struct OverflightCollectorMain {
 		var days: Int?
 		var siteSlug: String?
 		var migrateSlug: String?
+		var runSweep = false
+		var sweepCheck = false
 
 		var args = ArraySlice(CommandLine.arguments.dropFirst())
 		while let arg = args.popFirst() {
 			switch arg {
+			case "--sweep":
+				runSweep = true
+			case "--sweep-check":
+				sweepCheck = true
 			case "--config":
 				guard let v = args.popFirst() else { throw OverflightError.usage("--config requires a path") }
 				configPath = v
@@ -286,6 +294,33 @@ struct OverflightCollectorMain {
 			for s in config.sites {
 				print("\(s.slug)\t\(s.title)\t\(s.expandedDbPath)")
 			}
+			return
+		}
+
+		if sweepCheck {
+			if let sweep = config.sweep, sweep.enabled {
+				print(sweep.collectorLabel)
+			}
+			return
+		}
+
+		if runSweep {
+			guard let sweep = config.sweep, sweep.enabled else {
+				throw OverflightError.usage("no enabled sweep in config — add a \"sweep\" block")
+			}
+			let unified = try UnifiedStore(path: config.expandedUnifiedDbPath)
+			let loop = SweepLoop(config: config, sweep: sweep, unified: unified)
+			log("sweep starting [\(sweep.collectorLabel)]: \(sweep.lat),\(sweep.lon) r=\(Int(sweep.radiusNm))nm every \(Int(sweep.intervalS))s -> \(config.expandedUnifiedDbPath)")
+			let task = Task { await loop.run() }
+			let sigint = makeSignalSource(SIGINT, cancelling: task)
+			let sigterm = makeSignalSource(SIGTERM, cancelling: task)
+			defer {
+				sigint.cancel()
+				sigterm.cancel()
+			}
+			await task.value
+			await unified.close()
+			log("sweep stopped")
 			return
 		}
 

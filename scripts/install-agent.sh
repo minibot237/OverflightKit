@@ -68,6 +68,18 @@ for SLUG in $SLUGS; do
 	echo "started $LABEL -> log/$SLUG.log"
 done
 
+# Wide-area sweep rides the same binary with its own agent, when configured.
+SWEEP="$("$INSTALL_DIR/bin/OverflightCollector" --sweep-check)"
+if [ -n "$SWEEP" ]; then
+	LABEL="com.overflightkit.sweep.$SWEEP"
+	PLIST_DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
+	launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+	sed -e "s|__INSTALL_DIR__|$INSTALL_DIR|g" -e "s|__SLUG__|$SWEEP|g" \
+		launchd/com.overflightkit.sweep.plist.template > "$PLIST_DEST"
+	bootstrap_agent "$LABEL" "$PLIST_DEST"
+	echo "started $LABEL -> log/$SWEEP.log"
+fi
+
 echo ""
 echo "Useful commands:"
 echo "  tail -f $INSTALL_DIR/log/<slug>.log"
