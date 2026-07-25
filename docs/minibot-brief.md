@@ -234,10 +234,18 @@ follow along by pulling.
 
 ## Open decisions (Eric's - ask, do not assume)
 
-1. Repo access model for minibot: r/w deploy key to brewmium/OverflightKit vs
-   minibot owning the repo. (Eric is mulling.)
-2. The top-X focus airport list, and X.
-3. Hot-window size on SSD; spinning-disk hardware and mount layout.
+1. RESOLVED 2026-07-25: minibot owns the repo (github.com/minibot237/OverflightKit).
+2. The top-X focus airport list, and X. (East Coast 7 running as placeholder.)
+3. Hot-window size on SSD (30d placeholder); spinning-disk hardware and mount.
 4. Sweep region scope: CONUS, CONUS + coastal waters, world-someday.
-5. Whether the native macOS viewer gains a remote (query-API) mode or stays
-   local-DB only until the web UI replaces it for browsing.
+5. DECIDED 2026-07-25: the native viewer gains a remote (query-API) mode.
+   Handoff prompt for that session: docs/viewer-remote-prompt.md.
+
+## Placeholders awaiting Eric (as of 2026-07-25 free-run)
+
+- aisstream.io free API key -> ais.api_key in config, rerun install-agent.sh
+- Tailscale on minibot (server binds loopback until then)
+- Spinning disk -> archive_dir + ARCHIVE_DIR for install-compact.sh
+- kgmj parcel still repo-example coords (airport center, 400m)
+- Basemap licensing (OSM raster placeholder, Protomaps candidate)
+- Desktop collector retirement after soak
