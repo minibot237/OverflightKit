@@ -133,6 +133,11 @@ Record every verified fact back into this file (or the memory scope) with date.
   existing site agents (or the surviving set; seatacwa becomes a focus site
   anyway) on minibot from this repo. Proves the ops story. Desktop collectors
   get retired once minibot's are confirmed healthy.
+  STATUS 2026-07-25: running on minibot. Three agents installed (kgmj,
+  toledowa, seatacwa), fresh DBs, first polls healthy - seatacwa at ~50
+  aircraft/poll as expected, kgmj quiet. toledowa METAR = KKLS (verified
+  live: only reporting station in the bbox, even KCLS silent). KGMJ verified
+  reporting. Desktop retirement pending Eric's confirmation after soak.
 - Phase 1 - Unified store + ingest. New schema, collectors write to it,
   migrate the three site DBs in, sites become saved views. Query API skeleton
   (Tailscale-only) with bbox + window queries against the ingest tier.
