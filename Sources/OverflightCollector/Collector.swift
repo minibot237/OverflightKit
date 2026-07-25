@@ -26,12 +26,14 @@ struct CollectorLoop: Sendable {
 	let config: Config
 	let site: SiteConfig
 	let store: Store
+	let unified: UnifiedStore?
 	let session: URLSession
 
-	init(config: Config, site: SiteConfig, store: Store) {
+	init(config: Config, site: SiteConfig, store: Store, unified: UnifiedStore? = nil) {
 		self.config = config
 		self.site = site
 		self.store = store
+		self.unified = unified
 		let sc = URLSessionConfiguration.ephemeral
 		sc.timeoutIntervalForRequest = 8
 		sc.httpAdditionalHeaders = ["User-Agent": "OverflightKit/1.0 (+https://github.com/brewmium/OverflightKit)"]
@@ -126,6 +128,16 @@ struct CollectorLoop: Sendable {
 			} catch {
 				log("db write failed: \(error)")
 			}
+			if let unified {
+				do {
+					let obs = outcome.aircraft
+						.filter { $0.lat != nil && $0.lon != nil }
+						.map { UnifiedObservation(aircraft: $0, ts: outcome.record.ts, source: outcome.record.source) }
+					try await unified.record(poll: outcome.record, collector: site.slug, observations: obs)
+				} catch {
+					log("unified db write failed: \(error)")
+				}
+			}
 
 			pollCount += 1
 			if outcome.record.error == nil {
@@ -173,6 +185,9 @@ struct CollectorLoop: Sendable {
 				do {
 					let (sample, raw) = try await MetarClient.fetchLatest(station: site.metarStation, session: session)
 					try await store.record(metarTs: sample.ts, station: site.metarStation, altimHpa: sample.altimHpa, raw: raw)
+					if let unified {
+						try? await unified.record(metarTs: sample.ts, station: site.metarStation, altimHpa: sample.altimHpa, raw: raw)
+					}
 					lastMetarAttempt = now
 					log("metar \(site.metarStation): altim \(sample.altimHpa) hPa")
 				} catch {
@@ -216,9 +231,12 @@ struct OverflightCollectorMain {
 		  OverflightCollector --report [--days N] [--site SLUG]
 		                                                      print histograms + coverage diagnostic
 		  OverflightCollector --list-sites                    print configured sites
+		  OverflightCollector --migrate SLUG                  copy a site DB into the unified store
 
 		--site defaults to the first configured site; config defaults to
 		\(Config.defaultPath) and is created with KGMJ defaults if missing.
+		The collector loop appends to the unified store (unified_db_path)
+		alongside the per-site DB while the native viewer still reads site DBs.
 		"""
 	}
 
@@ -229,6 +247,7 @@ struct OverflightCollectorMain {
 		var listSites = false
 		var days: Int?
 		var siteSlug: String?
+		var migrateSlug: String?
 
 		var args = ArraySlice(CommandLine.arguments.dropFirst())
 		while let arg = args.popFirst() {
@@ -239,6 +258,9 @@ struct OverflightCollectorMain {
 			case "--site":
 				guard let v = args.popFirst() else { throw OverflightError.usage("--site requires a slug") }
 				siteSlug = v
+			case "--migrate":
+				guard let v = args.popFirst() else { throw OverflightError.usage("--migrate requires a site slug") }
+				migrateSlug = v
 			case "--report":
 				report = true
 			case "--once":
@@ -267,6 +289,18 @@ struct OverflightCollectorMain {
 			return
 		}
 
+		if let migrateSlug {
+			guard let site = config.site(slug: migrateSlug) else {
+				let known = config.sites.map(\.slug).joined(separator: ", ")
+				throw OverflightError.usage("unknown site '\(migrateSlug)' — configured: \(known)")
+			}
+			let unified = try UnifiedStore(path: config.expandedUnifiedDbPath)
+			let (polls, obs) = try await unified.migrateSiteDB(path: site.expandedDbPath, collector: site.slug)
+			await unified.close()
+			print("migrated \(site.slug): \(polls) polls, \(obs) observations -> \(config.expandedUnifiedDbPath)")
+			return
+		}
+
 		guard let site = config.site(slug: siteSlug) else {
 			let known = config.sites.map(\.slug).joined(separator: ", ")
 			throw OverflightError.usage("unknown site '\(siteSlug ?? "")' — configured: \(known)")
@@ -281,11 +315,13 @@ struct OverflightCollectorMain {
 		}
 
 		let store = try Store(path: site.expandedDbPath, readOnly: false)
-		let loop = CollectorLoop(config: config, site: site, store: store)
+		let unified = try UnifiedStore(path: config.expandedUnifiedDbPath)
+		let loop = CollectorLoop(config: config, site: site, store: store, unified: unified)
 
 		if once {
 			try await loop.pollOnce()
 			await store.close()
+			await unified.close()
 			return
 		}
 
@@ -299,6 +335,7 @@ struct OverflightCollectorMain {
 		}
 		await task.value
 		await store.close()
+		await unified.close()
 		log("collector stopped")
 	}
 }

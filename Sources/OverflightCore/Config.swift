@@ -106,12 +106,19 @@ public struct Config: Codable, Sendable, Equatable {
 	public var primarySource: String
 	public var fallbackSource: String
 	public var sites: [SiteConfig]
+	/// The unified two-tier ingest database every collector appends to.
+	public var unifiedDbPath: String
+
+	public var expandedUnifiedDbPath: String {
+		(unifiedDbPath as NSString).expandingTildeInPath
+	}
 
 	enum CodingKeys: String, CodingKey {
 		case sites
 		case pollIntervalS = "poll_interval_s"
 		case primarySource = "primary_source"
 		case fallbackSource = "fallback_source"
+		case unifiedDbPath = "unified_db_path"
 	}
 
 	private enum LegacyKeys: String, CodingKey {
@@ -132,11 +139,12 @@ public struct Config: Codable, Sendable, Equatable {
 		}
 	}
 
-	public init(pollIntervalS: Double, primarySource: String, fallbackSource: String, sites: [SiteConfig]) {
+	public init(pollIntervalS: Double, primarySource: String, fallbackSource: String, sites: [SiteConfig], unifiedDbPath: String = UnifiedStore.defaultPath) {
 		self.pollIntervalS = pollIntervalS
 		self.primarySource = primarySource
 		self.fallbackSource = fallbackSource
 		self.sites = sites
+		self.unifiedDbPath = unifiedDbPath
 	}
 
 	public init(from decoder: Decoder) throws {
@@ -145,6 +153,7 @@ public struct Config: Codable, Sendable, Equatable {
 		pollIntervalS = try c.decodeIfPresent(Double.self, forKey: .pollIntervalS) ?? d.pollIntervalS
 		primarySource = try c.decodeIfPresent(String.self, forKey: .primarySource) ?? d.primarySource
 		fallbackSource = try c.decodeIfPresent(String.self, forKey: .fallbackSource) ?? d.fallbackSource
+		unifiedDbPath = try c.decodeIfPresent(String.self, forKey: .unifiedDbPath) ?? UnifiedStore.defaultPath
 		if let decoded = try c.decodeIfPresent([SiteConfig].self, forKey: .sites), !decoded.isEmpty {
 			sites = decoded
 			return
