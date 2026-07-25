@@ -239,6 +239,10 @@ struct OverflightCollectorMain {
 		  OverflightCollector --migrate SLUG                  copy a site DB into the unified store
 		  OverflightCollector --sweep                         run the wide-area sweep loop
 		  OverflightCollector --sweep-check                   print sweep label if configured+enabled
+		  OverflightCollector --ais                           run the live AIS ship stream
+		  OverflightCollector --ais-check                     print "ais" if key configured+enabled
+		  OverflightCollector --rail                          run the Amtrak train poller
+		  OverflightCollector --rail-check                    print "rail" if configured+enabled
 
 		--site defaults to the first configured site; config defaults to
 		\(Config.defaultPath) and is created with KGMJ defaults if missing.
@@ -257,6 +261,10 @@ struct OverflightCollectorMain {
 		var migrateSlug: String?
 		var runSweep = false
 		var sweepCheck = false
+		var runAis = false
+		var aisCheck = false
+		var runRail = false
+		var railCheck = false
 
 		var args = ArraySlice(CommandLine.arguments.dropFirst())
 		while let arg = args.popFirst() {
@@ -265,6 +273,14 @@ struct OverflightCollectorMain {
 				runSweep = true
 			case "--sweep-check":
 				sweepCheck = true
+			case "--ais":
+				runAis = true
+			case "--ais-check":
+				aisCheck = true
+			case "--rail":
+				runRail = true
+			case "--rail-check":
+				railCheck = true
 			case "--config":
 				guard let v = args.popFirst() else { throw OverflightError.usage("--config requires a path") }
 				configPath = v
@@ -306,6 +322,57 @@ struct OverflightCollectorMain {
 			if let sweep = config.sweep, sweep.enabled {
 				print(sweep.collectorLabel)
 			}
+			return
+		}
+
+		if aisCheck {
+			if config.ais?.ready == true { print("ais") }
+			return
+		}
+
+		if railCheck {
+			if config.rail?.enabled == true { print("rail") }
+			return
+		}
+
+		if runAis {
+			guard let ais = config.ais, ais.ready else {
+				log("ais: not configured (need ais.api_key in config) — exiting")
+				return
+			}
+			let unified = try UnifiedStore(path: config.expandedUnifiedDbPath)
+			let loop = AisLoop(config: config, ais: ais, unified: unified)
+			log("ais starting: bbox \(ais.bbox) -> \(config.expandedUnifiedDbPath)")
+			let task = Task { await loop.run() }
+			let sigint = makeSignalSource(SIGINT, cancelling: task)
+			let sigterm = makeSignalSource(SIGTERM, cancelling: task)
+			defer {
+				sigint.cancel()
+				sigterm.cancel()
+			}
+			await task.value
+			await unified.close()
+			log("ais stopped")
+			return
+		}
+
+		if runRail {
+			guard let rail = config.rail, rail.enabled else {
+				throw OverflightError.usage("no enabled rail in config — add a \"rail\" block")
+			}
+			let unified = try UnifiedStore(path: config.expandedUnifiedDbPath)
+			let loop = RailLoop(config: config, rail: rail, unified: unified)
+			log("rail starting: amtraker every \(Int(rail.intervalS))s -> \(config.expandedUnifiedDbPath)")
+			let task = Task { await loop.run() }
+			let sigint = makeSignalSource(SIGINT, cancelling: task)
+			let sigterm = makeSignalSource(SIGTERM, cancelling: task)
+			defer {
+				sigint.cancel()
+				sigterm.cancel()
+			}
+			await task.value
+			await unified.close()
+			log("rail stopped")
 			return
 		}
 

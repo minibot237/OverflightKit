@@ -83,6 +83,23 @@ if [ -n "$SWEEP" ]; then
 	echo "started $LABEL -> log/$SWEEP.log"
 fi
 
+# Ships (needs an api key in config) and trains, same pattern.
+for MODE in ais rail; do
+	ENABLED="$("$INSTALL_DIR/bin/OverflightCollector" --$MODE-check)"
+	LABEL="com.overflightkit.$MODE"
+	if [ -n "$ENABLED" ]; then
+		PLIST_DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
+		launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+		sed -e "s|__INSTALL_DIR__|$INSTALL_DIR|g" -e "s|__MODE__|$MODE|g" \
+			launchd/com.overflightkit.mode.plist.template > "$PLIST_DEST"
+		bootstrap_agent "$LABEL" "$PLIST_DEST"
+		echo "started $LABEL -> log/$MODE.log"
+	else
+		launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+		rm -f "$HOME/Library/LaunchAgents/$LABEL.plist"
+	fi
+done
+
 echo ""
 echo "Useful commands:"
 echo "  tail -f $INSTALL_DIR/log/<slug>.log"

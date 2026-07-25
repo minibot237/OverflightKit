@@ -38,6 +38,11 @@ for DAY in $DAYS; do
 	SRC_COUNT="$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM observation WHERE ts >= $T0 AND ts < $T1;")"
 	[ "$SRC_COUNT" -gt 0 ] || continue
 
+	if [ -d "$OUT" ] && find "$OUT" -name "*.parquet" | grep -q .; then
+		# A backfill already owns this date partition; never clobber it.
+		log "SKIP $DAY: $OUT already has parquet (backfill?) — resolve by hand"
+		continue
+	fi
 	log "compacting $DAY: $SRC_COUNT rows -> $OUT"
 	rm -rf "$OUT"
 	duckdb -c "

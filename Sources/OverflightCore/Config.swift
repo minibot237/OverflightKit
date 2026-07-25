@@ -181,6 +181,58 @@ public struct SweepConfig: Codable, Sendable, Equatable {
 	}
 }
 
+/// Live AIS ships via aisstream.io. Needs a free API key (server-side only,
+/// per their terms); without one the collector logs and exits.
+public struct AisConfig: Codable, Sendable, Equatable {
+	public var apiKey: String?
+	/// [latMin, lonMin, latMax, lonMax] — default hugs CONUS coasts + rivers.
+	public var bbox: [Double]
+	public var enabled: Bool
+
+	enum CodingKeys: String, CodingKey {
+		case bbox, enabled
+		case apiKey = "api_key"
+	}
+
+	public init(apiKey: String?, bbox: [Double] = [24, -125, 50, -66], enabled: Bool = true) {
+		self.apiKey = apiKey
+		self.bbox = bbox
+		self.enabled = enabled
+	}
+
+	public init(from decoder: Decoder) throws {
+		let c = try decoder.container(keyedBy: CodingKeys.self)
+		apiKey = try c.decodeIfPresent(String.self, forKey: .apiKey)
+		let box = try c.decodeIfPresent([Double].self, forKey: .bbox) ?? [24, -125, 50, -66]
+		bbox = box.count == 4 ? box : [24, -125, 50, -66]
+		enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+	}
+
+	public var ready: Bool { enabled && !(apiKey ?? "").isEmpty }
+}
+
+/// Amtrak via the Amtraker community API. No key; be gentle anyway.
+public struct RailConfig: Codable, Sendable, Equatable {
+	public var intervalS: Double
+	public var enabled: Bool
+
+	enum CodingKeys: String, CodingKey {
+		case enabled
+		case intervalS = "interval_s"
+	}
+
+	public init(intervalS: Double = 60, enabled: Bool = true) {
+		self.intervalS = intervalS
+		self.enabled = enabled
+	}
+
+	public init(from decoder: Decoder) throws {
+		let c = try decoder.container(keyedBy: CodingKeys.self)
+		intervalS = try c.decodeIfPresent(Double.self, forKey: .intervalS) ?? 60
+		enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+	}
+}
+
 /// Global settings plus the site list, at ~/.overflight/config.json.
 /// A legacy single-site file (top-level `site`/`parcel`/`db_path` keys)
 /// decodes into a one-element site list, preserving its database path.
@@ -196,6 +248,10 @@ public struct Config: Codable, Sendable, Equatable {
 	/// Where nightly compaction parks Parquet partitions. SSD placeholder
 	/// today; point at the spinning disk when it arrives.
 	public var archiveDir: String
+	/// Optional live AIS ships.
+	public var ais: AisConfig?
+	/// Optional Amtrak trains.
+	public var rail: RailConfig?
 
 	public var expandedUnifiedDbPath: String {
 		(unifiedDbPath as NSString).expandingTildeInPath
@@ -206,7 +262,7 @@ public struct Config: Codable, Sendable, Equatable {
 	}
 
 	enum CodingKeys: String, CodingKey {
-		case sites, sweep
+		case sites, sweep, ais, rail
 		case pollIntervalS = "poll_interval_s"
 		case primarySource = "primary_source"
 		case fallbackSource = "fallback_source"
@@ -232,7 +288,7 @@ public struct Config: Codable, Sendable, Equatable {
 		}
 	}
 
-	public init(pollIntervalS: Double, primarySource: String, fallbackSource: String, sites: [SiteConfig], unifiedDbPath: String = UnifiedStore.defaultPath, sweep: SweepConfig? = nil, archiveDir: String = "~/.overflight/archive") {
+	public init(pollIntervalS: Double, primarySource: String, fallbackSource: String, sites: [SiteConfig], unifiedDbPath: String = UnifiedStore.defaultPath, sweep: SweepConfig? = nil, archiveDir: String = "~/.overflight/archive", ais: AisConfig? = nil, rail: RailConfig? = nil) {
 		self.pollIntervalS = pollIntervalS
 		self.primarySource = primarySource
 		self.fallbackSource = fallbackSource
@@ -240,6 +296,8 @@ public struct Config: Codable, Sendable, Equatable {
 		self.unifiedDbPath = unifiedDbPath
 		self.sweep = sweep
 		self.archiveDir = archiveDir
+		self.ais = ais
+		self.rail = rail
 	}
 
 	public init(from decoder: Decoder) throws {
@@ -251,6 +309,8 @@ public struct Config: Codable, Sendable, Equatable {
 		unifiedDbPath = try c.decodeIfPresent(String.self, forKey: .unifiedDbPath) ?? UnifiedStore.defaultPath
 		sweep = try c.decodeIfPresent(SweepConfig.self, forKey: .sweep)
 		archiveDir = try c.decodeIfPresent(String.self, forKey: .archiveDir) ?? "~/.overflight/archive"
+		ais = try c.decodeIfPresent(AisConfig.self, forKey: .ais)
+		rail = try c.decodeIfPresent(RailConfig.self, forKey: .rail)
 		if let decoded = try c.decodeIfPresent([SiteConfig].self, forKey: .sites), !decoded.isEmpty {
 			sites = decoded
 			return

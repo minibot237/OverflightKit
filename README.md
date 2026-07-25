@@ -180,15 +180,23 @@ question at pattern altitudes, and no amount of histogram is going to fix that.
 
 ## Data sources
 
-- [adsb.lol](https://adsb.lol) — primary. Open data, ODbL licensed, no key.
-- [airplanes.live](https://airplanes.live) — fallback. Personal,
-  non-commercial use; hard limit 1 request/second.
+- [adsb.lol](https://adsb.lol) — aircraft, primary. Open data, ODbL licensed,
+  no key.
+- [airplanes.live](https://airplanes.live) — aircraft, fallback + focus
+  fleet. Personal, non-commercial use; hard limit 1 request/second.
 - [aviationweather.gov](https://aviationweather.gov) — hourly METAR for the
   altimeter setting.
+- [Amtraker](https://github.com/piemadd/amtrak) — train positions
+  (Amtrak + VIA). Community API over Amtrak's own Track-a-Train data;
+  attribution requested and hereby given. Polled once a minute.
+- [aisstream.io](https://aisstream.io) — live ship positions (websocket,
+  free key required; beta, no SLA).
+- [NOAA MarineCadastre](https://hub.marinecadastre.gov) — historical ship
+  traffic backfill, public bulk downloads.
 
 This project only reads from these services, at a gentle rate, and feeds
-nothing back. No accounts, keys, or credentials are involved. Aircraft-owner
-identification and route inference are explicitly out of scope.
+nothing back. Aircraft-owner identification and route inference are
+explicitly out of scope.
 
 ## License
 
