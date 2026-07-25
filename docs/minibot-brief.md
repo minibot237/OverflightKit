@@ -109,6 +109,38 @@ Resolution follows purpose. Do not chase one global number.
 - N collectors on one IP polling in phase stampede the aggregator -
   deterministic per-slug phase offset (stable hash, never String.hashValue)
   spreads them.
+- adsb.lol /v2/point radius is NOT capped at 250nm (2026-07-25, exercised
+  live): 250nm -> 329 ac / 168KB / 1.1s; 500 -> 1468 / 747KB / 1.4s;
+  1000 -> 4313 / 2.2MB / 1.8s; 1300 (covers CONUS from 39.5,-98.35) ->
+  6324 ac / 3.2MB / 1.9s. No truncation at any size (total == len(ac)),
+  msg "No error". One CONUS request per 60s tick is the whole sweep.
+- airplanes.live /v2/point hard-caps radius: 250nm OK (334 ac / 192KB),
+  500nm+ -> HTTP 403 openresty HTML (2026-07-25). Failover sweep must tile
+  at 250nm (~20 tiles for CONUS) under the documented 1 req/s.
+- OpenSky (2026-07-25, exercised): anonymous CONUS bbox in one request -
+  5929 states / 790KB / 1.4s. Anonymous = 400 credits/day, >400 sq-deg
+  bbox costs 4 credits -> 100 CONUS snapshots/day (~15min cadence).
+  Registered = OAuth2 client-credentials ONLY (no basic auth), 30-min
+  tokens, 4000 credits/day. Good supplement, not primary.
+- Amtrak via api-v3.amtraker.com/v3/trains (2026-07-25, exercised): no key,
+  190 trains, 1.2MB, 375ms. Dict keyed by trainNum -> ARRAY of runs; fields
+  lat, lon, heading (compass string like "N"), velocity, trainID, routeName,
+  lastValTS. Attribution requested. /v3/stale reports feed freshness.
+- AISStream.io (docs fetched 2026-07-25): wss://stream.aisstream.io/v0/stream,
+  free API key (signup required - Eric), subscription JSON must be sent
+  within 3s of connect: {APIKey, BoundingBoxes: [[[lat,lon],[lat,lon]]],
+  FilterMessageTypes: ["PositionReport"]}. Beta, no SLA. Keys server-side.
+- NOAA MarineCadastre (2026-07-25, header-verified live): 2025+ files at
+  coast.noaa.gov/htdata/CMSP/AISDataHandler/2025/ais-2025-MM-DD.csv.zst
+  (~220MB/day, zstd). Columns (lon BEFORE lat, lowercase): mmsi,
+  base_date_time, longitude, latitude, sog, cog, heading, vessel_name, imo,
+  call_sign, vessel_type, status, length, width, draft, cargo, transceiver.
+  2024-and-earlier era: AIS_YYYY_MM_DD.zip (~324MB/day), Capitalized
+  columns, LAT before LON, T-separated timestamps. No auth either era.
+- GTFS-RT keyless VehiclePositions verified reachable: MBTA
+  cdn.mbta.com/realtime/VehiclePositions.pb (incl. commuter rail); MTA LIRR
+  api-endpoint.mta.info/Dataservice/mtagtfsfeeds/lirr%2Fgtfs-lirr (keep the
+  %2F encoded). NYC subway feeds carry stop-relative positions, not GPS.
 
 ## Must verify before building (Verify First - probe the live wire, then code)
 
