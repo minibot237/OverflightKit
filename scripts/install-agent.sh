@@ -28,6 +28,9 @@ for existing in "$HOME"/Library/LaunchAgents/com.overflightkit.collector.*.plist
 done
 rm -f "$HOME/Library/LaunchAgents/com.overflightkit.collector.plist"
 
+# rm first: cp over a Mach-O that is currently exec'ing wedges the exec in
+# an unkillable UE state. A fresh inode never collides with a running image.
+rm -f "$INSTALL_DIR/bin/OverflightCollector"
 cp "$BIN_DIR/OverflightCollector" "$INSTALL_DIR/bin/"
 
 if [ $# -gt 0 ]; then

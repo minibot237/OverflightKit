@@ -75,6 +75,39 @@ public struct UnifiedObservation: Sendable, Equatable {
 	}
 }
 
+/// A contiguous run of one vehicle's observations — the query API's unit of
+/// answer. Split whenever the gap between consecutive points exceeds `gapS`
+/// (same 300s rule the parcel analytics use).
+public struct UnifiedTrack: Sendable {
+	public var kind: VehicleKind
+	public var vid: String
+	public var callsign: String?
+	public var points: [UnifiedObservation]
+}
+
+/// Group bbox-query results (already ordered kind, vid, ts) into tracks.
+public func segmentTracks(_ observations: [UnifiedObservation], gapS: Int64 = 300) -> [UnifiedTrack] {
+	var out: [UnifiedTrack] = []
+	var current: [UnifiedObservation] = []
+	func flush() {
+		guard let first = current.first else { return }
+		out.append(UnifiedTrack(
+			kind: first.kind, vid: first.vid,
+			callsign: current.compactMap(\.callsign).last,
+			points: current))
+		current = []
+	}
+	for o in observations {
+		if let last = current.last,
+			last.vid != o.vid || last.kind != o.kind || o.ts - last.ts > gapS {
+			flush()
+		}
+		current.append(o)
+	}
+	flush()
+	return out
+}
+
 /// Per-collector health, straight off the unified poll table.
 public struct CollectorHealth: Sendable, Codable {
 	public var collector: String
