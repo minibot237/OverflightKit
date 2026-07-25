@@ -162,9 +162,9 @@ follow along by pulling.
   every "verified" claim with what was actually exercised.
 - Storage discipline: SSD is ingest + hot window; spinning disk is archive.
   Nothing irreplaceable lives only on SSD after compaction runs exist.
-- Repo conventions: terse lowercase commit style matching git log; no
-  Co-Authored-By trailers; tab indentation; ASCII unless a file already uses
-  more.
+- Repo conventions: minibot's house style now that minibot owns the repo -
+  casual commit messages, Co-Authored-By trailers fine. Keep tab indentation
+  in existing Swift sources for diff hygiene.
 - This is Eric's data hobby, not production SaaS. Bias to simple, observable,
   restartable processes (LaunchAgents, SQLite, files) over infrastructure.
 
