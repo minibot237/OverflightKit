@@ -192,5 +192,5 @@ identification and route inference are explicitly out of scope.
 
 ## License
 
-Brewmium, LLC License — free for personal, educational, and non-commercial
+Minibot License — free for personal, educational, and non-commercial
 use; see [LICENSE.md](LICENSE.md).
