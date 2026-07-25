@@ -29,6 +29,11 @@ struct CollectorLoop: Sendable {
 	let unified: UnifiedStore?
 	let session: URLSession
 
+	// Per-site overrides let a focus fleet spend a different source's budget.
+	var primarySource: String { site.primarySource ?? config.primarySource }
+	var fallbackSource: String { site.fallbackSource ?? config.fallbackSource }
+	var pollIntervalS: Double { site.pollIntervalS ?? config.pollIntervalS }
+
 	init(config: Config, site: SiteConfig, store: Store, unified: UnifiedStore? = nil) {
 		self.config = config
 		self.site = site
@@ -80,12 +85,12 @@ struct CollectorLoop: Sendable {
 	}
 
 	func pollOnce() async throws {
-		let outcome = await pollSource(named: config.primarySource)
+		let outcome = await pollSource(named: primarySource)
 		try await store.record(poll: outcome.record, aircraft: outcome.aircraft)
 		if let err = outcome.record.error {
-			log("\(config.primarySource): ERROR \(err)")
+			log("\(primarySource): ERROR \(err)")
 		} else {
-			log("\(config.primarySource): \(outcome.record.aircraftCount) aircraft, \(outcome.record.latencyMs ?? 0)ms")
+			log("\(primarySource): \(outcome.record.aircraftCount) aircraft, \(outcome.record.latencyMs ?? 0)ms")
 			for a in outcome.aircraft {
 				let alt: String
 				switch a.altBaro {
@@ -115,12 +120,12 @@ struct CollectorLoop: Sendable {
 		// per-slug phase offset keeps them interleaved instead of stampeding
 		// the aggregator together (which is what draws 429s at startup).
 		let stableHash = site.slug.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0x7fff_ffff }
-		let phaseS = Double(stableHash % 1000) / 1000 * config.pollIntervalS
+		let phaseS = Double(stableHash % 1000) / 1000 * pollIntervalS
 		try? await Task.sleep(for: .seconds(phaseS))
 
 		while !Task.isCancelled {
 			let probing = !activePrimary && pollsUntilPrimaryProbe <= 0
-			let sourceName = (activePrimary || probing) ? config.primarySource : config.fallbackSource
+			let sourceName = (activePrimary || probing) ? primarySource : fallbackSource
 
 			let outcome = await pollSource(named: sourceName)
 			do {
@@ -147,7 +152,7 @@ struct CollectorLoop: Sendable {
 				backoffS = 0
 				if probing {
 					activePrimary = true
-					log("primary \(config.primarySource) recovered — switching back")
+					log("primary \(primarySource) recovered — switching back")
 				}
 			} else {
 				log("\(sourceName): \(outcome.record.error ?? "?")")
@@ -156,7 +161,7 @@ struct CollectorLoop: Sendable {
 					pollsUntilPrimaryProbe = 30
 				} else {
 					failStreak += 1
-					backoffS = min(backoffS == 0 ? config.pollIntervalS * 2 : backoffS * 2, 300)
+					backoffS = min(backoffS == 0 ? pollIntervalS * 2 : backoffS * 2, 300)
 					if let ra = outcome.retryAfterS {
 						// The server told us when to come back; believe it.
 						backoffS = min(max(ra, backoffS), 300)
@@ -166,7 +171,7 @@ struct CollectorLoop: Sendable {
 						pollsUntilPrimaryProbe = 30
 						failStreak = 0
 						backoffS = 0
-						log("switching to fallback \(config.fallbackSource)")
+						log("switching to fallback \(fallbackSource)")
 					}
 				}
 			}
@@ -197,7 +202,7 @@ struct CollectorLoop: Sendable {
 				}
 			}
 
-			let base = backoffS > 0 ? backoffS : config.pollIntervalS
+			let base = backoffS > 0 ? backoffS : pollIntervalS
 			// Jitter so requests don't land on a fixed phase; never below 1s
 			// (airplanes.live hard limit is 1 request/second).
 			let delay = max(1.0, base + Double.random(in: -1...1))
@@ -360,7 +365,7 @@ struct OverflightCollectorMain {
 			return
 		}
 
-		log("collector starting [\(site.slug)]: \(site.lat),\(site.lon) r=\(Int(site.radiusNm))nm every \(Int(config.pollIntervalS))s -> \(site.expandedDbPath)")
+		log("collector starting [\(site.slug)]: \(site.lat),\(site.lon) r=\(Int(site.radiusNm))nm every \(Int(site.pollIntervalS ?? config.pollIntervalS))s via \(site.primarySource ?? config.primarySource) -> \(site.expandedDbPath)")
 		let task = Task { await loop.run() }
 		let sigint = makeSignalSource(SIGINT, cancelling: task)
 		let sigterm = makeSignalSource(SIGTERM, cancelling: task)

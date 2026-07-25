@@ -15,6 +15,11 @@ public struct SiteConfig: Codable, Sendable, Equatable, Identifiable {
 	public var dbPath: String
 	public var metarStation: String
 	public var timezone: String
+	/// Per-site overrides so a focus fleet can spend a different aggregator's
+	/// request budget than the default sites (politeness is per-source).
+	public var primarySource: String?
+	public var fallbackSource: String?
+	public var pollIntervalS: Double?
 
 	public var id: String { slug }
 
@@ -42,6 +47,9 @@ public struct SiteConfig: Codable, Sendable, Equatable, Identifiable {
 		case radiusNm = "radius_nm"
 		case dbPath = "db_path"
 		case metarStation = "metar_station"
+		case primarySource = "primary_source"
+		case fallbackSource = "fallback_source"
+		case pollIntervalS = "poll_interval_s"
 	}
 
 	public init(
@@ -62,6 +70,9 @@ public struct SiteConfig: Codable, Sendable, Equatable, Identifiable {
 		self.dbPath = dbPath ?? "~/.overflight/\(slug).db"
 		self.metarStation = metarStation ?? icao ?? ""
 		self.timezone = timezone
+		self.primarySource = nil
+		self.fallbackSource = nil
+		self.pollIntervalS = nil
 	}
 
 	public init(from decoder: Decoder) throws {
@@ -79,6 +90,9 @@ public struct SiteConfig: Codable, Sendable, Equatable, Identifiable {
 		dbPath = try c.decodeIfPresent(String.self, forKey: .dbPath) ?? "~/.overflight/\(slug).db"
 		metarStation = try c.decodeIfPresent(String.self, forKey: .metarStation) ?? icao ?? ""
 		timezone = try c.decodeIfPresent(String.self, forKey: .timezone) ?? "America/Chicago"
+		primarySource = try c.decodeIfPresent(String.self, forKey: .primarySource)
+		fallbackSource = try c.decodeIfPresent(String.self, forKey: .fallbackSource)
+		pollIntervalS = try c.decodeIfPresent(Double.self, forKey: .pollIntervalS)
 	}
 
 	public var expandedDbPath: String {

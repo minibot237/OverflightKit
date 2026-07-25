@@ -2,6 +2,15 @@
 	"poll_interval_s": 10,
 	"primary_source": "adsb.lol",
 	"fallback_source": "airplanes.live",
+	"unified_db_path": "~/.overflight/unified.db",
+	"archive_dir": "~/.overflight/archive",
+	"sweep": {
+		"slug": "conus",
+		"lat": 39.5,
+		"lon": -98.35,
+		"radius_nm": 1300,
+		"interval_s": 60
+	},
 	"sites": [
 		{
 			"slug": "kgmj",
@@ -16,26 +25,22 @@
 				"lon": -94.7386,
 				"radius_m": 400
 			},
-			"db_path": "~/.overflight/overflight.db",
+			"db_path": "~/.overflight/kgmj.db",
 			"metar_station": "KGMJ",
 			"timezone": "America/Chicago"
 		},
 		{
-			"slug": "ktol",
-			"icao": "KTOL",
-			"display_name": "Toledo Express, OH",
-			"lat": 41.5868,
-			"lon": -83.8078,
-			"field_elevation_ft": 683,
+			"slug": "kjfk",
+			"icao": "KJFK",
+			"display_name": "John F Kennedy Intl",
+			"lat": 40.6394,
+			"lon": -73.7793,
+			"field_elevation_ft": 13,
 			"radius_nm": 15,
-			"parcel": {
-				"lat": 41.5868,
-				"lon": -83.8078,
-				"radius_m": 400
-			},
-			"db_path": "~/.overflight/ktol.db",
-			"metar_station": "KTOL",
-			"timezone": "America/New_York"
+			"timezone": "America/New_York",
+			"primary_source": "airplanes.live",
+			"fallback_source": "adsb.lol",
+			"poll_interval_s": 12
 		}
 	]
 }
