@@ -2,15 +2,34 @@ import SwiftUI
 import CoreLocation
 import OverflightCore
 
-/// Landing view for a new (or re-targeted) window: pick an existing site —
-/// including one already open elsewhere, which gives you a clone — or add a
-/// new one. Lookup accepts an ICAO identifier or a place name ("Toledo, WA");
-/// places are geocoded and paired with the nearest METAR-reporting station.
+/// Landing view for a new (or re-targeted) window: pick a local site —
+/// including one already open elsewhere, which gives you a clone — add a new
+/// one, or flip to Remote and browse minibot's query API instead. Lookup
+/// accepts an ICAO identifier or a place name ("Toledo, WA"); places are
+/// geocoded and paired with the nearest METAR-reporting station.
 struct SitePickerView: View {
-	let onPick: (SiteConfig, Config) -> Void
+	enum BrowseMode: String {
+		case local, remote
+	}
+
+	let onPick: (ViewerSelection) -> Void
 
 	@State private var config: Config = (try? Config.loadOrCreate()) ?? .kgmjDefault
 	@State private var showingAdd = false
+
+	// Remote mode: server URL + the views it serves, both remembered.
+	@State private var mode: BrowseMode
+	@State private var serverURL: String
+	@State private var remoteViews: [RemoteView] = []
+	@State private var remoteBusy = false
+	@State private var remoteError: String?
+
+	init(onPick: @escaping (ViewerSelection) -> Void) {
+		self.onPick = onPick
+		let saved = BrowseModeState.load()
+		_mode = State(initialValue: BrowseMode(rawValue: saved.mode ?? "") ?? .local)
+		_serverURL = State(initialValue: saved.serverURL ?? BrowseModeState.defaultServerURL)
+	}
 
 	// Add-site form fields (strings so partial input never fights a formatter)
 	@State private var query = ""
@@ -31,11 +50,121 @@ struct SitePickerView: View {
 			if showingAdd {
 				addFormView
 			} else {
-				siteListView
+				pickerView
 			}
 		}
 		.frame(minWidth: 500, minHeight: 440)
 		.navigationTitle(showingAdd ? "Overflight — add site" : "Overflight — pick a site")
+	}
+
+	// MARK: - Mode picker
+
+	private var pickerView: some View {
+		VStack(spacing: 0) {
+			Picker("Mode", selection: $mode) {
+				Text("Local DBs").tag(BrowseMode.local)
+				Text("Remote (minibot)").tag(BrowseMode.remote)
+			}
+			.pickerStyle(.segmented)
+			.labelsHidden()
+			.padding(10)
+			.onChange(of: mode) {
+				persistBrowseMode()
+				if mode == .remote, remoteViews.isEmpty {
+					connect()
+				}
+			}
+			Divider()
+			if mode == .local {
+				siteListView
+			} else {
+				remoteListView
+			}
+		}
+		.task {
+			if mode == .remote {
+				connect()
+			}
+		}
+	}
+
+	private func persistBrowseMode() {
+		var state = BrowseModeState.load()
+		state.mode = mode.rawValue
+		state.serverURL = serverURL
+		state.save()
+	}
+
+	// MARK: - Remote list
+
+	private var remoteListView: some View {
+		VStack(spacing: 0) {
+			HStack {
+				TextField("Server URL", text: $serverURL, prompt: Text(BrowseModeState.defaultServerURL))
+					.textFieldStyle(.roundedBorder)
+					.onSubmit { connect() }
+				Button(remoteBusy ? "Connecting..." : "Connect") { connect() }
+					.disabled(remoteBusy)
+			}
+			.padding(10)
+			if let remoteError {
+				Label(remoteError, systemImage: "exclamationmark.triangle.fill")
+					.font(.caption)
+					.foregroundStyle(Viz.statusCritical)
+					.padding(.horizontal, 10)
+					.padding(.bottom, 6)
+			}
+			List {
+				Section("Open a view") {
+					ForEach(remoteViews) { view in
+						Button {
+							guard let api = RemoteAPI(urlString: serverURL) else { return }
+							onPick(.remote(api: api, view: view, all: remoteViews))
+						} label: {
+							VStack(alignment: .leading, spacing: 2) {
+								Text(view.title)
+									.font(.headline)
+								Text("\(String(format: "%.4f, %.4f", view.lat, view.lon)) - \(Int(view.radiusNm)) nm - \(view.slug)")
+									.font(.caption)
+									.foregroundStyle(.secondary)
+							}
+							.contentShape(Rectangle())
+						}
+						.buttonStyle(.plain)
+					}
+				}
+			}
+			Divider()
+			HStack {
+				Text("Sites are configured on the server; analytics stay local-mode.")
+					.font(.caption2)
+					.foregroundStyle(.secondary)
+				Spacer()
+			}
+			.padding(10)
+		}
+	}
+
+	private func connect() {
+		guard let api = RemoteAPI(urlString: serverURL) else {
+			remoteError = "server URL must look like \(BrowseModeState.defaultServerURL)"
+			return
+		}
+		remoteBusy = true
+		remoteError = nil
+		persistBrowseMode()
+		Task {
+			defer { remoteBusy = false }
+			do {
+				remoteViews = try await api.views()
+				if remoteViews.isEmpty {
+					remoteError = "server answered, but serves no views"
+				}
+			} catch {
+				remoteViews = []
+				remoteError = "\(error)"
+			}
+		}
 	}
 
 	// MARK: - Site list
@@ -46,7 +175,7 @@ struct SitePickerView: View {
 				Section("Open a site") {
 					ForEach(config.sites) { site in
 						Button {
-							onPick(site, config)
+							onPick(.local(site: site, config: config))
 						} label: {
 							VStack(alignment: .leading, spacing: 2) {
 								Text(site.title)
@@ -238,7 +367,7 @@ struct SitePickerView: View {
 			Task {
 				try? await AgentInstaller.startCollector(site: site)
 			}
-			onPick(site, updated)
+			onPick(.local(site: site, config: updated))
 		} catch {
 			formError = "saving config: \(error)"
 		}

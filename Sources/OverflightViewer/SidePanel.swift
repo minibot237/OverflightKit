@@ -51,10 +51,19 @@ struct SidePanel: View {
 					get: { model.rangePreset },
 					set: { model.setPreset($0) }
 				)) {
-					Text("24h").tag(RangePreset.day)
-					Text("7d").tag(RangePreset.week)
-					Text("30d").tag(RangePreset.month)
-					Text("All").tag(RangePreset.all)
+					// Remote re-fetches whole windows from the API, so the
+					// presets skew shorter there.
+					if model.isRemote {
+						Text("1h").tag(RangePreset.hour)
+						Text("6h").tag(RangePreset.sixHours)
+						Text("24h").tag(RangePreset.day)
+						Text("7d").tag(RangePreset.week)
+					} else {
+						Text("24h").tag(RangePreset.day)
+						Text("7d").tag(RangePreset.week)
+						Text("30d").tag(RangePreset.month)
+						Text("All").tag(RangePreset.all)
+					}
 					if model.rangePreset == .custom {
 						Text("Custom").tag(RangePreset.custom)
 					}
@@ -71,7 +80,8 @@ struct SidePanel: View {
 				))
 			}
 
-			Section("Altitude bands (ft AGL)") {
+			// Remote tracks carry raw altitude, not AGL — label honestly.
+			Section(model.isRemote ? "Altitude bands (ft)" : "Altitude bands (ft AGL)") {
 				ForEach(AltitudeBand.allCases, id: \.self) { band in
 					Toggle(isOn: Binding(
 						get: { model.enabledBands.contains(band) },
@@ -92,22 +102,66 @@ struct SidePanel: View {
 						}
 					}
 				}
-				Toggle(isOn: Binding(
-					get: { model.showGround },
-					set: { on in
-						model.showGround = on
-						model.bandFilterChanged()
-					}
-				)) {
-					HStack(spacing: 6) {
-						RoundedRectangle(cornerRadius: 2)
-							.fill(Viz.ground)
-							.frame(width: 12, height: 12)
-						Text("Ground traffic")
+				// The API doesn't label ground observations; the toggle would lie.
+				if !model.isRemote {
+					Toggle(isOn: Binding(
+						get: { model.showGround },
+						set: { on in
+							model.showGround = on
+							model.bandFilterChanged()
+						}
+					)) {
+						HStack(spacing: 6) {
+							RoundedRectangle(cornerRadius: 2)
+								.fill(Viz.ground)
+								.frame(width: 12, height: 12)
+							Text("Ground traffic")
+						}
 					}
 				}
 			}
 
+			if model.isRemote {
+				Section("Kinds") {
+					kindToggle(.aircraft, label: "Aircraft", color: Viz.seriesBlue)
+					kindToggle(.vessel, label: "Ships", color: Viz.vessel)
+					kindToggle(.train, label: "Trains", color: Viz.train)
+				}
+			}
+
+			if !model.isRemote {
+				localSections
+			}
+		}
+		.formStyle(.grouped)
+	}
+
+	private func kindToggle(_ kind: VehicleKind, label: String, color: Color) -> some View {
+		Toggle(isOn: Binding(
+			get: { model.enabledKinds.contains(kind) },
+			set: { on in
+				if on {
+					model.enabledKinds.insert(kind)
+				} else if model.enabledKinds.count > 1 {
+					model.enabledKinds.remove(kind)
+				}
+				model.kindFilterChanged()
+			}
+		)) {
+			HStack(spacing: 6) {
+				RoundedRectangle(cornerRadius: 2)
+					.fill(color)
+					.frame(width: 12, height: 12)
+				Text(label)
+			}
+		}
+	}
+
+	/// Parcel-study analytics — local databases only, per the brief; the
+	/// remote API has no parcel, METAR, or poll-table context.
+	@ViewBuilder
+	private var localSections: some View {
+			@Bindable var model = model
 			Section("Parcel") {
 				LabeledContent("Center") {
 					Text(String(format: "%.5f, %.5f", model.parcelLat, model.parcelLon))
@@ -198,8 +252,6 @@ struct SidePanel: View {
 					}
 				}
 			}
-		}
-		.formStyle(.grouped)
 	}
 
 	private var hourData: [BarChartView.BarDatum] {
@@ -248,20 +300,26 @@ struct SidePanel: View {
 
 	private func activeRow(_ flight: ActiveFlight) -> some View {
 		let swatch = Viz.identity(flight.colorIndex)
-		let alt: String
-		if flight.onGround {
+		let alt: String?
+		if flight.kind != .aircraft {
+			// Surface movers: altitude would just be noise.
+			alt = nil
+		} else if flight.onGround {
 			alt = "on ground"
 		} else if let agl = flight.aglFt {
-			alt = "\(Int(agl.rounded())) ft AGL (\(flight.altSource.label))"
+			alt = model.isRemote
+				? "\(Int(agl.rounded())) ft"
+				: "\(Int(agl.rounded())) ft AGL (\(flight.altSource.label))"
 		} else {
 			alt = "altitude unknown"
 		}
 		let age = max(0, Int64(Date().timeIntervalSince1970) - flight.lastTs)
-		var detail = alt
+		var parts: [String] = alt.map { [$0] } ?? []
 		if let gs = flight.gsKt {
-			detail += " - \(Int(gs.rounded())) kt"
+			parts.append("\(Int(gs.rounded())) kt")
 		}
-		detail += " - \(age < 60 ? "\(age)s" : "\(age / 60)m") ago"
+		parts.append("\(age < 60 ? "\(age)s" : "\(age / 60)m") ago")
+		let detail = parts.joined(separator: " - ")
 		return HStack(spacing: 6) {
 			Circle()
 				.fill(swatch)

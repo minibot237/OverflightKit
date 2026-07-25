@@ -12,6 +12,7 @@ struct SiteViewState: Codable {
 	var spanLonDeg: Double?
 	var enabledBands: [Int]?
 	var showGround: Bool?
+	var enabledKinds: [String]?
 
 	static func load(slug: String) -> SiteViewState {
 		guard let data = UserDefaults.standard.data(forKey: key(slug)),
@@ -36,5 +37,30 @@ struct SiteViewState: Codable {
 
 	private static func key(_ slug: String) -> String {
 		"siteState.\(slug)"
+	}
+}
+
+/// Which browsing mode the picker was left in and where the remote server
+/// lives. Same UserDefaults treatment as the per-site state.
+struct BrowseModeState: Codable {
+	var mode: String?
+	var serverURL: String?
+
+	static let defaultServerURL = "http://127.0.0.1:9200"
+	private static let key = "browseMode"
+
+	static func load() -> BrowseModeState {
+		guard let data = UserDefaults.standard.data(forKey: key),
+			let state = try? JSONDecoder().decode(BrowseModeState.self, from: data)
+		else {
+			return BrowseModeState()
+		}
+		return state
+	}
+
+	func save() {
+		if let data = try? JSONEncoder().encode(self) {
+			UserDefaults.standard.set(data, forKey: Self.key)
+		}
 	}
 }

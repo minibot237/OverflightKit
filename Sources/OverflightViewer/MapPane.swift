@@ -39,7 +39,7 @@ struct MapPane: NSViewRepresentable {
 		context.coordinator.model = model
 
 		let center = CLLocationCoordinate2D(latitude: model.site.lat, longitude: model.site.lon)
-		let saved = SiteViewState.load(slug: model.site.slug)
+		let saved = SiteViewState.load(slug: model.viewStateSlug)
 		if let lat = saved.centerLat, let lon = saved.centerLon,
 			let dLat = saved.spanLatDeg, let dLon = saved.spanLonDeg {
 			map.setRegion(
@@ -59,7 +59,7 @@ struct MapPane: NSViewRepresentable {
 
 		let site = SiteAnnotation()
 		site.coordinate = center
-		site.title = "Field"
+		site.title = model.isRemote ? model.site.displayName : "Field"
 		map.addAnnotation(site)
 
 		return map
@@ -72,7 +72,9 @@ struct MapPane: NSViewRepresentable {
 			coord.overlayRevision = model.mapRevision
 			coord.rebuildTrackOverlays(map, segments: model.segmentsByClass, heads: model.trackHeads)
 		}
-		coord.syncParcel(map, lat: model.parcelLat, lon: model.parcelLon, radiusM: model.parcelRadiusM)
+		if !model.isRemote {
+			coord.syncParcel(map, lat: model.parcelLat, lon: model.parcelLon, radiusM: model.parcelRadiusM)
+		}
 		if let focus = model.focusRequest, focus.seq != coord.handledFocusSeq {
 			coord.handledFocusSeq = focus.seq
 			coord.focus(map, trackId: focus.trackId)
@@ -152,7 +154,7 @@ struct MapPane: NSViewRepresentable {
 			map.removeOverlays(map.overlays.filter { $0 is BandMultiPolyline })
 			// Draw order: ground first, then high bands down to low, so the
 			// low-altitude traffic — the interesting signal — sits on top.
-			var order: [SegmentClass] = [.ground, .unknownAlt]
+			var order: [SegmentClass] = [.ground, .unknownAlt, .vessel, .train]
 			order += AltitudeBand.allCases.reversed().map { .band($0.rawValue) }
 			for cls in order {
 				guard let runs = segments[cls], !runs.isEmpty else { continue }
@@ -189,14 +191,17 @@ struct MapPane: NSViewRepresentable {
 		/// Fires at the end of every pan/zoom (and after programmatic region
 		/// changes) — remember where this site's map was left.
 		func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
-			guard let slug = model?.site.slug else { return }
+			guard let model else { return }
 			let region = mapView.region
-			SiteViewState.update(slug: slug) {
+			SiteViewState.update(slug: model.viewStateSlug) {
 				$0.centerLat = region.center.latitude
 				$0.centerLon = region.center.longitude
 				$0.spanLatDeg = region.span.latitudeDelta
 				$0.spanLonDeg = region.span.longitudeDelta
 			}
+			model.mapRegionChanged(
+				centerLat: region.center.latitude, centerLon: region.center.longitude,
+				spanLat: region.span.latitudeDelta, spanLon: region.span.longitudeDelta)
 		}
 
 		func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
@@ -209,6 +214,10 @@ struct MapPane: NSViewRepresentable {
 					r.strokeColor = Viz.mapGround
 				case .unknownAlt:
 					r.strokeColor = Viz.mapUnknown
+				case .vessel:
+					r.strokeColor = Viz.mapVessel
+				case .train:
+					r.strokeColor = Viz.mapTrain
 				}
 				r.lineWidth = 2
 				return r

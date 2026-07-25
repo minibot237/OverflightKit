@@ -28,6 +28,15 @@ struct StatusStrip: View {
 	}
 
 	private var health: Health {
+		if model.isRemote {
+			guard let last = model.remoteHealth?.lastTs else { return .none }
+			let age = Date().timeIntervalSince1970 - Double(last)
+			// The sweep ticks at 60s, so give the server a little more slack
+			// than a 10s local collector before calling it stale.
+			if age < 90 { return .live }
+			if age < 300 { return .stale }
+			return .down
+		}
 		guard let stats = model.pollStats else { return .none }
 		let age = Date().timeIntervalSince1970 - Double(stats.lastTs)
 		if age < 60 { return .live }
@@ -42,7 +51,21 @@ struct StatusStrip: View {
 				Circle()
 					.fill(health.color)
 					.frame(width: 7, height: 7)
-				Text("collector \(health.label)")
+				Text(model.isRemote ? "server \(health.label)" : "collector \(health.label)")
+			}
+			if model.isRemote, let h = model.remoteHealth {
+				let erroring = h.collectors.filter { $0.errorsLastHour > 0 }.count
+				Text("collectors \(h.collectors.count)" + (erroring > 0 ? " (\(erroring) with errors)" : ""))
+				if let last = h.lastTs {
+					Text("data \(relative(last))")
+				}
+				if let bytes = h.dbBytes {
+					Text("db \(fmt(Int(bytes / 1_048_576))) MB")
+				}
+				if model.remoteTruncated {
+					Text("truncated — zoom in or shorten the range")
+						.foregroundStyle(Viz.statusWarning)
+				}
 			}
 			if let stats = model.pollStats {
 				Text("polls \(fmt(stats.totalPolls)) (\(fmt(stats.errorPolls)) err)")

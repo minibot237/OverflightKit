@@ -32,6 +32,9 @@ enum Viz {
 	static let mapBand: [NSColor] = [0xcde2fb, 0x86b6ef, 0x3987e5, 0x256abf, 0x184f95].map { NSColor(hex: $0) }
 	static let mapGround = NSColor(hex: 0x898781)
 	static let mapUnknown = NSColor(hex: 0x898781).withAlphaComponent(0.6)
+	/// Non-aircraft kinds in remote mode — same hues the web UI uses.
+	static let mapVessel = NSColor(hex: 0xb39ddb)
+	static let mapTrain = NSColor(hex: 0xf48fb1)
 	static let parcelFill = NSColor(hex: 0xeb6834).withAlphaComponent(0.12)
 	static let parcelStroke = NSColor(hex: 0xeb6834)
 
@@ -66,6 +69,8 @@ enum Viz {
 	}
 
 	static let seriesBlue = Color(nsColor: .dynamic(light: 0x2a78d6, dark: 0x3987e5))
+	static let vessel = Color(nsColor: NSColor(hex: 0xb39ddb))
+	static let train = Color(nsColor: NSColor(hex: 0xf48fb1))
 	static let ground = Color(nsColor: NSColor(hex: 0x898781))
 	static let mutedInk = Color(nsColor: NSColor(hex: 0x898781))
 	static let gridline = Color(nsColor: .dynamic(light: 0xe1e0d9, dark: 0x2c2c2a))
