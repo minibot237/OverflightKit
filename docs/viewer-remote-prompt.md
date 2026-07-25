@@ -1,5 +1,11 @@
 # Session prompt: give OverflightViewer a remote (query-API) mode
 
+STATUS 2026-07-25: DONE. RemoteAPI client in OverflightCore (decode-tested),
+mode picker in the site picker, remote windows follow the map viewport +
+time window, vessel/train render in the web UI's colors, server health in
+the status strip, parcel analytics local-only as specced. Verified live:
+SeaTac tracks rendering from :9200. 39 tests green. Kept for reference.
+
 Copy everything below the line into a fresh Claude session running in
 `~/workshop/OverflightKit`.
 

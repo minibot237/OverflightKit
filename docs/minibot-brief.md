@@ -238,8 +238,13 @@ follow along by pulling.
 2. The top-X focus airport list, and X. (East Coast 7 running as placeholder.)
 3. Hot-window size on SSD (30d placeholder); spinning-disk hardware and mount.
 4. Sweep region scope: CONUS, CONUS + coastal waters, world-someday.
-5. DECIDED 2026-07-25: the native viewer gains a remote (query-API) mode.
-   Handoff prompt for that session: docs/viewer-remote-prompt.md.
+5. DONE 2026-07-25: the native viewer has a remote (query-API) mode. Mode
+   picker in the site picker (Local DBs / Remote (minibot), URL remembered),
+   remote sites from /api/views, tracks from /api/tracks following the map
+   viewport + time window, vessel/train kinds render in the web UI's colors,
+   status strip shows server health. Parcel analytics stay local-mode.
+   Verified live against :9200 (SeaTac tracks + Amtrak Cascades). 39 tests.
+   `swift run OverflightViewer --remote [slug]` jumps straight in.
 
 ## Placeholders awaiting Eric (as of 2026-07-25 free-run)
 
