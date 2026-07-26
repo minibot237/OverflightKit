@@ -188,22 +188,30 @@ public struct AisConfig: Codable, Sendable, Equatable {
 	/// [latMin, lonMin, latMax, lonMax] — default hugs CONUS coasts + rivers.
 	public var bbox: [Double]
 	public var enabled: Bool
-	/// Per-vessel downsample: keep at most one position per vessel per this
-	/// many seconds. Class A transponders report every 2-10s underway, which
-	/// is firehose noise at ship speed — 120s is ~1.2km at 20kt.
+	/// Movement gate (see MovementGate): `min_interval_s` is the floor between
+	/// kept points per vessel — a fast mover writes at this cadence; class A
+	/// transponders report every 2-10s underway, which is firehose noise.
+	/// `min_move_m` is how far a vessel must travel to earn a point sooner
+	/// than `stamp_interval_s`, the parked-vessel keepalive.
 	public var minIntervalS: Double
+	public var minMoveM: Double
+	public var stampIntervalS: Double
 
 	enum CodingKeys: String, CodingKey {
 		case bbox, enabled
 		case apiKey = "api_key"
 		case minIntervalS = "min_interval_s"
+		case minMoveM = "min_move_m"
+		case stampIntervalS = "stamp_interval_s"
 	}
 
-	public init(apiKey: String?, bbox: [Double] = [24, -125, 50, -66], enabled: Bool = true, minIntervalS: Double = 120) {
+	public init(apiKey: String?, bbox: [Double] = [24, -125, 50, -66], enabled: Bool = true, minIntervalS: Double = 30, minMoveM: Double = 100, stampIntervalS: Double = 600) {
 		self.apiKey = apiKey
 		self.bbox = bbox
 		self.enabled = enabled
 		self.minIntervalS = minIntervalS
+		self.minMoveM = minMoveM
+		self.stampIntervalS = stampIntervalS
 	}
 
 	public init(from decoder: Decoder) throws {
@@ -212,31 +220,46 @@ public struct AisConfig: Codable, Sendable, Equatable {
 		let box = try c.decodeIfPresent([Double].self, forKey: .bbox) ?? [24, -125, 50, -66]
 		bbox = box.count == 4 ? box : [24, -125, 50, -66]
 		enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
-		minIntervalS = try c.decodeIfPresent(Double.self, forKey: .minIntervalS) ?? 120
+		minIntervalS = try c.decodeIfPresent(Double.self, forKey: .minIntervalS) ?? 30
+		minMoveM = try c.decodeIfPresent(Double.self, forKey: .minMoveM) ?? 100
+		stampIntervalS = try c.decodeIfPresent(Double.self, forKey: .stampIntervalS) ?? 600
 	}
 
 	public var ready: Bool { enabled && !(apiKey ?? "").isEmpty }
 }
 
 /// Amtrak via the Amtraker community API. No key; be gentle anyway.
+/// The movement gate here mostly kills station-dwell and stale-fix
+/// duplicates — the feed repeats a train's last position until its tracker
+/// reports a new one.
 public struct RailConfig: Codable, Sendable, Equatable {
 	public var intervalS: Double
 	public var enabled: Bool
+	/// Movement gate: how far a train must move since its last kept point
+	/// to earn a new one before `stamp_interval_s` elapses.
+	public var minMoveM: Double
+	public var stampIntervalS: Double
 
 	enum CodingKeys: String, CodingKey {
 		case enabled
 		case intervalS = "interval_s"
+		case minMoveM = "min_move_m"
+		case stampIntervalS = "stamp_interval_s"
 	}
 
-	public init(intervalS: Double = 60, enabled: Bool = true) {
+	public init(intervalS: Double = 60, enabled: Bool = true, minMoveM: Double = 25, stampIntervalS: Double = 600) {
 		self.intervalS = intervalS
 		self.enabled = enabled
+		self.minMoveM = minMoveM
+		self.stampIntervalS = stampIntervalS
 	}
 
 	public init(from decoder: Decoder) throws {
 		let c = try decoder.container(keyedBy: CodingKeys.self)
 		intervalS = try c.decodeIfPresent(Double.self, forKey: .intervalS) ?? 60
 		enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+		minMoveM = try c.decodeIfPresent(Double.self, forKey: .minMoveM) ?? 25
+		stampIntervalS = try c.decodeIfPresent(Double.self, forKey: .stampIntervalS) ?? 600
 	}
 }
 

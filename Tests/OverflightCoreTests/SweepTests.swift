@@ -40,20 +40,35 @@ final class SweepTests: XCTestCase {
 		XCTAssertEqual(config.sweep?.collectorLabel, "sweep-conus")
 	}
 
-	func testAisDecodesWithDownsampleDefault() throws {
+	func testAisDecodesWithGateDefaults() throws {
 		let json = """
 		{"sites": [{"lat": 1, "lon": 2, "icao": "KTST"}],
 		 "ais": {"api_key": "abc123"}}
 		"""
 		let config = try JSONDecoder().decode(Config.self, from: Data(json.utf8))
 		XCTAssertEqual(config.ais?.ready, true)
-		XCTAssertEqual(config.ais?.minIntervalS, 120)
+		XCTAssertEqual(config.ais?.minIntervalS, 30)
+		XCTAssertEqual(config.ais?.minMoveM, 100)
+		XCTAssertEqual(config.ais?.stampIntervalS, 600)
 		XCTAssertEqual(config.ais?.bbox, [24, -125, 50, -66])
 
 		let tuned = try JSONDecoder().decode(Config.self, from: Data("""
 		{"sites": [{"lat": 1, "lon": 2, "icao": "KTST"}],
-		 "ais": {"api_key": "abc123", "min_interval_s": 300}}
+		 "ais": {"api_key": "abc123", "min_interval_s": 60, "min_move_m": 250, "stamp_interval_s": 3600}}
 		""".utf8))
-		XCTAssertEqual(tuned.ais?.minIntervalS, 300)
+		XCTAssertEqual(tuned.ais?.minIntervalS, 60)
+		XCTAssertEqual(tuned.ais?.minMoveM, 250)
+		XCTAssertEqual(tuned.ais?.stampIntervalS, 3600)
+	}
+
+	func testRailDecodesWithGateDefaults() throws {
+		let json = """
+		{"sites": [{"lat": 1, "lon": 2, "icao": "KTST"}],
+		 "rail": {"stamp_interval_s": 1800}}
+		"""
+		let config = try JSONDecoder().decode(Config.self, from: Data(json.utf8))
+		XCTAssertEqual(config.rail?.intervalS, 60)
+		XCTAssertEqual(config.rail?.minMoveM, 25)
+		XCTAssertEqual(config.rail?.stampIntervalS, 1800)
 	}
 }

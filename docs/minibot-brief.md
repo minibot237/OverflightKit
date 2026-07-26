@@ -202,17 +202,23 @@ Record every verified fact back into this file (or the memory scope) with date.
 - Phase 5 - Ships. AISStream live collector (kind=vessel) + NOAA historical
   backfill loader. Same store, same viewer.
   STATUS 2026-07-25: LIVE. Eric supplied the aisstream key; ais agent
-  running, ~150-250 vessels/flush across the CONUS-coasts bbox. Per Eric
-  (beta service, ship speeds): per-vessel downsample keeps one position
-  per vessel per 120s (ais.min_interval_s), dropping the 2-10s class-A
-  firehose on arrival; reconnects back off to 5m. NOAA backfill proven:
-  2025-01-01 loaded, 7.34M vessel rows straight to archive Parquet,
-  queryable through the API (marine queries want &gap=1800+, anchored
-  ships report sporadically).
+  running across the CONUS-coasts bbox. Per Eric (beta service, ship
+  speeds): MovementGate per vessel — floor 30s between kept points (fast
+  movers get fine cadence), keep on >=100m of movement, 10min keepalive
+  stamp for anchored ships so they stay present in windows. All knobs in
+  config: ais.min_interval_s / min_move_m / stamp_interval_s. Reconnects
+  back off to 5m. NOAA backfill proven: 2025-01-01 loaded, 7.34M vessel
+  rows straight to archive Parquet, queryable through the API (marine
+  queries want &gap=1800+).
 - Phase 6 - Rail, opportunistic. Amtrak + GTFS-RT adapters where feeds exist.
   STATUS 2026-07-25: Amtrak DONE and running (Amtraker, 60s, kind=train,
-  ~57 trains/poll incl. VIA). GTFS-RT adapters not built; MBTA and MTA LIRR
-  verified keyless if ever wanted.
+  ~57 trains/poll incl. VIA). MovementGate on writes (rail.min_move_m 25m,
+  stamp_interval_s 600) kills station-dwell and stale-fix duplicates — the
+  feed repeats a train's last position until its tracker updates. Known
+  limit: track-shape "triangles" on curvy lines are source resolution
+  (fixes arrive ~1/min), not poll cadence; map-matching to rail lines is
+  the someday fix. GTFS-RT adapters not built; MBTA and MTA LIRR verified
+  keyless if ever wanted.
 
 Phases land in order but need not be fully sequential - e.g. ship probes can
 run during Phase 2. Keep commits small and pushed; Eric and desktop sessions

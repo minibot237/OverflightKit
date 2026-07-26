@@ -102,13 +102,15 @@ struct AisLoop: Sendable {
 
 		var buffer: [UnifiedObservation] = []
 		var lastFlush = Date()
+		var lastPrune = Date()
 		let decoder = JSONDecoder()
-		// Per-vessel downsample: the stream is a firehose (class A reports
-		// every 2-10s underway) but ships are slow — keep one position per
-		// vessel per min_interval_s and drop the rest on arrival. Bounded by
-		// the real vessel count in the bbox.
-		var lastKept: [String: Int64] = [:]
-		let minInterval = Int64(ais.minIntervalS)
+		// The stream is a firehose (class A reports every 2-10s underway) but
+		// ships are slow — the gate admits movement, drops parked repeats, and
+		// stamps a keepalive so anchored vessels stay present in windows.
+		var gate = MovementGate(
+			floorS: Int64(ais.minIntervalS),
+			minMoveM: ais.minMoveM,
+			stampS: Int64(ais.stampIntervalS))
 		while !Task.isCancelled {
 			let msg = try await ws.receive()
 			let data: Data
@@ -120,9 +122,12 @@ struct AisLoop: Sendable {
 			let ts = Int64(Date().timeIntervalSince1970)
 			if let frame = try? decoder.decode(Frame.self, from: data),
 				let obs = observation(from: frame, ts: ts),
-				ts - (lastKept[obs.vid] ?? 0) >= minInterval {
-				lastKept[obs.vid] = ts
+				gate.admit(vid: obs.vid, ts: ts, lat: obs.lat, lon: obs.lon) {
 				buffer.append(obs)
+			}
+			if Date().timeIntervalSince(lastPrune) >= 3600 {
+				lastPrune = Date()
+				gate.prune(now: ts)
 			}
 			if Date().timeIntervalSince(lastFlush) >= Self.flushIntervalS {
 				let batch = buffer

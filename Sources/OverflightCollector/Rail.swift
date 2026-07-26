@@ -78,18 +78,30 @@ struct RailLoop: Sendable {
 
 	func run() async {
 		var pollCount = 0
+		// Amtraker repeats a train's last fix until its tracker updates, and
+		// station dwell would otherwise write the same spot every poll — the
+		// gate keeps movement and stamps parked trains periodically. No floor:
+		// the poll interval already bounds cadence.
+		var gate = MovementGate(
+			floorS: 0,
+			minMoveM: rail.minMoveM,
+			stampS: Int64(rail.stampIntervalS))
 		while !Task.isCancelled {
 			let (record, obs) = await pollOnce()
+			let kept = obs.filter { gate.admit(vid: $0.vid, ts: $0.ts, lat: $0.lat, lon: $0.lon) }
 			do {
-				try await unified.record(poll: record, collector: "rail", observations: obs)
+				try await unified.record(poll: record, collector: "rail", observations: kept)
 			} catch {
 				log("rail db write failed: \(error)")
 			}
 			pollCount += 1
+			if pollCount % 60 == 0 {
+				gate.prune(now: Int64(Date().timeIntervalSince1970))
+			}
 			if let err = record.error {
 				log("rail: \(err)")
 			} else if pollCount % 30 == 1 {
-				log("rail: \(record.aircraftCount) trains, \(record.latencyMs ?? 0)ms")
+				log("rail: \(record.aircraftCount) trains seen, \(kept.count) kept, \(record.latencyMs ?? 0)ms")
 			}
 			let delay = max(30, rail.intervalS + Double.random(in: -2...2))
 			do {
