@@ -201,11 +201,14 @@ Record every verified fact back into this file (or the memory scope) with date.
   footer. Tailscale not yet on minibot, so the server binds loopback.
 - Phase 5 - Ships. AISStream live collector (kind=vessel) + NOAA historical
   backfill loader. Same store, same viewer.
-  STATUS 2026-07-25: BUILT. Live AIS loop ready but parked until Eric signs
-  up for a free aisstream.io key (ais.api_key in config; agent installs
-  itself once present). NOAA backfill proven: 2025-01-01 loaded, 7.34M
-  vessel rows straight to archive Parquet, queryable through the API
-  (marine queries want &gap=1800+, anchored ships report sporadically).
+  STATUS 2026-07-25: LIVE. Eric supplied the aisstream key; ais agent
+  running, ~150-250 vessels/flush across the CONUS-coasts bbox. Per Eric
+  (beta service, ship speeds): per-vessel downsample keeps one position
+  per vessel per 120s (ais.min_interval_s), dropping the 2-10s class-A
+  firehose on arrival; reconnects back off to 5m. NOAA backfill proven:
+  2025-01-01 loaded, 7.34M vessel rows straight to archive Parquet,
+  queryable through the API (marine queries want &gap=1800+, anchored
+  ships report sporadically).
 - Phase 6 - Rail, opportunistic. Amtrak + GTFS-RT adapters where feeds exist.
   STATUS 2026-07-25: Amtrak DONE and running (Amtraker, 60s, kind=train,
   ~57 trains/poll incl. VIA). GTFS-RT adapters not built; MBTA and MTA LIRR
@@ -248,7 +251,6 @@ follow along by pulling.
 
 ## Placeholders awaiting Eric (as of 2026-07-25 free-run)
 
-- aisstream.io free API key -> ais.api_key in config, rerun install-agent.sh
 - Tailscale on minibot (server binds loopback until then)
 - Spinning disk -> archive_dir + ARCHIVE_DIR for install-compact.sh
 - kgmj parcel still repo-example coords (airport center, 400m)

@@ -39,4 +39,21 @@ final class SweepTests: XCTestCase {
 		XCTAssertEqual(config.sweep?.enabled, true)
 		XCTAssertEqual(config.sweep?.collectorLabel, "sweep-conus")
 	}
+
+	func testAisDecodesWithDownsampleDefault() throws {
+		let json = """
+		{"sites": [{"lat": 1, "lon": 2, "icao": "KTST"}],
+		 "ais": {"api_key": "abc123"}}
+		"""
+		let config = try JSONDecoder().decode(Config.self, from: Data(json.utf8))
+		XCTAssertEqual(config.ais?.ready, true)
+		XCTAssertEqual(config.ais?.minIntervalS, 120)
+		XCTAssertEqual(config.ais?.bbox, [24, -125, 50, -66])
+
+		let tuned = try JSONDecoder().decode(Config.self, from: Data("""
+		{"sites": [{"lat": 1, "lon": 2, "icao": "KTST"}],
+		 "ais": {"api_key": "abc123", "min_interval_s": 300}}
+		""".utf8))
+		XCTAssertEqual(tuned.ais?.minIntervalS, 300)
+	}
 }

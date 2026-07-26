@@ -188,16 +188,22 @@ public struct AisConfig: Codable, Sendable, Equatable {
 	/// [latMin, lonMin, latMax, lonMax] — default hugs CONUS coasts + rivers.
 	public var bbox: [Double]
 	public var enabled: Bool
+	/// Per-vessel downsample: keep at most one position per vessel per this
+	/// many seconds. Class A transponders report every 2-10s underway, which
+	/// is firehose noise at ship speed — 120s is ~1.2km at 20kt.
+	public var minIntervalS: Double
 
 	enum CodingKeys: String, CodingKey {
 		case bbox, enabled
 		case apiKey = "api_key"
+		case minIntervalS = "min_interval_s"
 	}
 
-	public init(apiKey: String?, bbox: [Double] = [24, -125, 50, -66], enabled: Bool = true) {
+	public init(apiKey: String?, bbox: [Double] = [24, -125, 50, -66], enabled: Bool = true, minIntervalS: Double = 120) {
 		self.apiKey = apiKey
 		self.bbox = bbox
 		self.enabled = enabled
+		self.minIntervalS = minIntervalS
 	}
 
 	public init(from decoder: Decoder) throws {
@@ -206,6 +212,7 @@ public struct AisConfig: Codable, Sendable, Equatable {
 		let box = try c.decodeIfPresent([Double].self, forKey: .bbox) ?? [24, -125, 50, -66]
 		bbox = box.count == 4 ? box : [24, -125, 50, -66]
 		enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+		minIntervalS = try c.decodeIfPresent(Double.self, forKey: .minIntervalS) ?? 120
 	}
 
 	public var ready: Bool { enabled && !(apiKey ?? "").isEmpty }
