@@ -52,8 +52,11 @@ struct SidePanel: View {
 					set: { model.setPreset($0) }
 				)) {
 					// Remote re-fetches whole windows from the API, so the
-					// presets skew shorter there.
+					// presets skew shorter there — dense at the "watch it
+					// move" end.
 					if model.isRemote {
+						Text("10m").tag(RangePreset.tenMinutes)
+						Text("30m").tag(RangePreset.thirtyMinutes)
 						Text("1h").tag(RangePreset.hour)
 						Text("6h").tag(RangePreset.sixHours)
 						Text("24h").tag(RangePreset.day)
@@ -78,6 +81,24 @@ struct SidePanel: View {
 					get: { model.rangeEnd },
 					set: { model.setCustomRange(end: $0) }
 				))
+				Picker("Trail fade", selection: Binding(
+					get: { model.trailFadeFraction ?? 0 },
+					set: { fraction in
+						model.trailFadeFraction = fraction == 0 ? nil : fraction
+						model.trailFadeChanged()
+					}
+				)) {
+					Text("Off").tag(0.0)
+					Text("10%").tag(0.1)
+					Text("25%").tag(0.25)
+					Text("50%").tag(0.5)
+					Text("100%").tag(1.0)
+				}
+				if model.trailFadeFraction != nil {
+					Text("Trails dim with age and vanish past that share of the window.")
+						.font(.caption2)
+						.foregroundStyle(.secondary)
+				}
 			}
 
 			// Remote tracks carry raw altitude, not AGL — label honestly.

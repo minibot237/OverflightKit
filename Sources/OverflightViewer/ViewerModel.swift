@@ -12,7 +12,15 @@ enum SegmentClass: Hashable, Sendable {
 }
 
 enum RangePreset: Hashable {
-	case hour, sixHours, day, week, month, all, custom
+	case tenMinutes, thirtyMinutes, hour, sixHours, day, week, month, all, custom
+}
+
+/// Key for one drawable polyline batch: the altitude/kind class plus an age
+/// bucket for trail fading. Bucket 0 is newest (opaque); higher buckets fade;
+/// points past the fade horizon aren't drawn at all.
+struct SegmentKey: Hashable, Sendable {
+	let cls: SegmentClass
+	let fadeBucket: Int
 }
 
 /// The leading tip of a still-active track: where the aircraft is right now,
@@ -79,6 +87,9 @@ final class ViewerModel {
 	var rangePreset: RangePreset = .week
 	var enabledBands: Set<AltitudeBand> = Set(AltitudeBand.allCases)
 	var showGround = false
+	/// Trail fade: a point is fully gone once its age exceeds this fraction
+	/// of the window; opacity ramps down on the way. nil = no fade.
+	var trailFadeFraction: Double?
 
 	// Parcel (persisted back to the site's config entry automatically)
 	var parcelLat: Double
@@ -101,7 +112,7 @@ final class ViewerModel {
 	private(set) var bandHist = BandHistogram()
 	private(set) var coverage: CoverageDiagnostic?
 	private(set) var pollStats: PollStats?
-	private(set) var segmentsByClass: [SegmentClass: [[CLLocationCoordinate2D]]] = [:]
+	private(set) var trackSegments: [SegmentKey: [[CLLocationCoordinate2D]]] = [:]
 	private(set) var trackHeads: [TrackHead] = []
 	private(set) var activeFlights: [ActiveFlight] = []
 	private(set) var mapRevision = 0
@@ -144,6 +155,7 @@ final class ViewerModel {
 		if let ground = saved.showGround {
 			showGround = ground
 		}
+		trailFadeFraction = saved.trailFadeFraction
 	}
 
 	init(remote: RemoteAPI, view: RemoteView) {
@@ -180,6 +192,7 @@ final class ViewerModel {
 			let parsed = Set(kinds.compactMap(VehicleKind.init(rawValue:)))
 			if !parsed.isEmpty { enabledKinds = parsed }
 		}
+		trailFadeFraction = saved.trailFadeFraction
 	}
 
 	private static func defaultBbox(site: SiteConfig) -> (latMin: Double, lonMin: Double, latMax: Double, lonMax: Double) {
@@ -206,6 +219,7 @@ final class ViewerModel {
 			$0.enabledBands = enabledBands.map(\.rawValue).sorted()
 			$0.showGround = showGround
 			$0.enabledKinds = enabledKinds.map(\.rawValue).sorted()
+			$0.trailFadeFraction = trailFadeFraction
 		}
 	}
 
@@ -242,6 +256,8 @@ final class ViewerModel {
 			if rangePreset != .custom {
 				rangeEnd = Date()
 				switch rangePreset {
+				case .tenMinutes: rangeStart = rangeEnd.addingTimeInterval(-600)
+				case .thirtyMinutes: rangeStart = rangeEnd.addingTimeInterval(-1800)
 				case .hour: rangeStart = rangeEnd.addingTimeInterval(-3600)
 				case .sixHours: rangeStart = rangeEnd.addingTimeInterval(-6 * 3600)
 				case .day: rangeStart = rangeEnd.addingTimeInterval(-86_400)
@@ -306,6 +322,8 @@ final class ViewerModel {
 			let store = try openStoreIfNeeded()
 			rangeEnd = Date()
 			switch rangePreset {
+			case .tenMinutes: rangeStart = rangeEnd.addingTimeInterval(-600)
+			case .thirtyMinutes: rangeStart = rangeEnd.addingTimeInterval(-1800)
 			case .hour: rangeStart = rangeEnd.addingTimeInterval(-3600)
 			case .sixHours: rangeStart = rangeEnd.addingTimeInterval(-6 * 3600)
 			case .day: rangeStart = rangeEnd.addingTimeInterval(-86_400)
@@ -350,6 +368,8 @@ final class ViewerModel {
 		if rangePreset != .custom {
 			rangeEnd = Date()
 			switch rangePreset {
+			case .tenMinutes: rangeStart = rangeEnd.addingTimeInterval(-600)
+			case .thirtyMinutes: rangeStart = rangeEnd.addingTimeInterval(-1800)
 			case .hour: rangeStart = rangeEnd.addingTimeInterval(-3600)
 			case .sixHours: rangeStart = rangeEnd.addingTimeInterval(-6 * 3600)
 			case .day: rangeStart = rangeEnd.addingTimeInterval(-86_400)
@@ -417,35 +437,17 @@ final class ViewerModel {
 	/// Remote flavor of rebuildSegments: same run-splitting, classes from
 	/// kind + raw altitude.
 	private func rebuildRemoteSegments() {
-		var out: [SegmentClass: [[CLLocationCoordinate2D]]] = [:]
+		var out: [SegmentKey: [[CLLocationCoordinate2D]]] = [:]
+		let windowEnd = Int64(rangeEnd.timeIntervalSince1970)
+		let horizon = fadeHorizonS
 		for t in remoteTracks {
 			guard let kind = t.vehicleKind, enabledKinds.contains(kind) else { continue }
-			var runClass: SegmentClass?
-			var run: [CLLocationCoordinate2D] = []
-
-			func flush() {
-				if run.count >= 2, let rc = runClass, isEnabled(rc) {
-					out[rc, default: []].append(run)
-				}
+			let points = t.points.map { p -> (ts: Int64, lat: Double, lon: Double, cls: SegmentClass) in
+				(p.ts, p.lat, p.lon, Self.remoteClass(kind: kind, altFt: p.altFt))
 			}
-
-			for p in t.points {
-				let cls = Self.remoteClass(kind: kind, altFt: p.altFt)
-				let coord = CLLocationCoordinate2D(latitude: p.lat, longitude: p.lon)
-				if cls != runClass {
-					flush()
-					var newRun: [CLLocationCoordinate2D] = []
-					if let lastCoord = run.last { newRun.append(lastCoord) }
-					newRun.append(coord)
-					run = newRun
-					runClass = cls
-				} else {
-					run.append(coord)
-				}
-			}
-			flush()
+			appendRuns(points: points, windowEnd: windowEnd, horizonS: horizon, into: &out)
 		}
-		segmentsByClass = out
+		trackSegments = out
 		rebuildRemoteHeads()
 		mapRevision += 1
 	}
@@ -565,6 +567,65 @@ final class ViewerModel {
 		bandHist = Analysis.bandHistogram(ofs)
 	}
 
+	static let fadeBuckets = 6
+
+	/// Which fade bucket a point falls in: 0 = newest/opaque up to
+	/// fadeBuckets-1 = oldest still drawn; nil = past the horizon, gone.
+	/// Horizon 0 disables fading (everything lands in bucket 0).
+	static func fadeBucket(ts: Int64, windowEnd: Int64, horizonS: Double) -> Int? {
+		guard horizonS > 0 else { return 0 }
+		let age = Double(windowEnd - ts)
+		if age < 0 { return 0 }
+		guard age < horizonS else { return nil }
+		return min(Int(age / horizonS * Double(fadeBuckets)), fadeBuckets - 1)
+	}
+
+	/// Fade horizon in seconds for the current window, 0 when fading is off.
+	private var fadeHorizonS: Double {
+		(trailFadeFraction ?? 0) * max(0, rangeEnd.timeIntervalSince(rangeStart))
+	}
+
+	/// Shared run splitter: split wherever the class OR fade bucket changes so
+	/// each run can wear its color and opacity; aged-out points break the run.
+	private func appendRuns(
+		points: [(ts: Int64, lat: Double, lon: Double, cls: SegmentClass)],
+		windowEnd: Int64, horizonS: Double,
+		into out: inout [SegmentKey: [[CLLocationCoordinate2D]]]
+	) {
+		var runKey: SegmentKey?
+		var run: [CLLocationCoordinate2D] = []
+
+		func flush() {
+			if run.count >= 2, let rk = runKey, isEnabled(rk.cls) {
+				out[rk, default: []].append(run)
+			}
+		}
+
+		for p in points {
+			guard let bucket = Self.fadeBucket(ts: p.ts, windowEnd: windowEnd, horizonS: horizonS) else {
+				flush()
+				runKey = nil
+				run = []
+				continue
+			}
+			let key = SegmentKey(cls: p.cls, fadeBucket: bucket)
+			let coord = CLLocationCoordinate2D(latitude: p.lat, longitude: p.lon)
+			if key != runKey {
+				flush()
+				// Carry the previous point over so the polyline stays continuous
+				// across a class or fade boundary.
+				var newRun: [CLLocationCoordinate2D] = []
+				if let lastCoord = run.last { newRun.append(lastCoord) }
+				newRun.append(coord)
+				run = newRun
+				runKey = key
+			} else {
+				run.append(coord)
+			}
+		}
+		flush()
+	}
+
 	/// Map polyline geometry, split wherever the altitude band changes so each
 	/// run can wear its band color; disabled bands are dropped here.
 	func rebuildSegments() {
@@ -572,18 +633,11 @@ final class ViewerModel {
 			rebuildRemoteSegments()
 			return
 		}
-		var out: [SegmentClass: [[CLLocationCoordinate2D]]] = [:]
+		var out: [SegmentKey: [[CLLocationCoordinate2D]]] = [:]
+		let windowEnd = Int64(rangeEnd.timeIntervalSince1970)
+		let horizon = fadeHorizonS
 		for t in tracks {
-			var runClass: SegmentClass?
-			var run: [CLLocationCoordinate2D] = []
-
-			func flush() {
-				if run.count >= 2, let rc = runClass, isEnabled(rc) {
-					out[rc, default: []].append(run)
-				}
-			}
-
-			for p in t.points {
+			let points = t.points.map { p -> (ts: Int64, lat: Double, lon: Double, cls: SegmentClass) in
 				let cls: SegmentClass
 				if p.onGround {
 					cls = .ground
@@ -592,25 +646,18 @@ final class ViewerModel {
 				} else {
 					cls = .unknownAlt
 				}
-				let coord = CLLocationCoordinate2D(latitude: p.lat, longitude: p.lon)
-				if cls != runClass {
-					flush()
-					// Carry the previous point over so the polyline stays continuous
-					// across a band change.
-					var newRun: [CLLocationCoordinate2D] = []
-					if let lastCoord = run.last { newRun.append(lastCoord) }
-					newRun.append(coord)
-					run = newRun
-					runClass = cls
-				} else {
-					run.append(coord)
-				}
+				return (p.ts, p.lat, p.lon, cls)
 			}
-			flush()
+			appendRuns(points: points, windowEnd: windowEnd, horizonS: horizon, into: &out)
 		}
-		segmentsByClass = out
+		trackSegments = out
 		rebuildTrackHeads()
 		mapRevision += 1
+	}
+
+	func trailFadeChanged() {
+		rebuildSegments()
+		persistBandSelection()
 	}
 
 	/// Head markers and the "Active now" list for tracks still receiving

@@ -13,6 +13,7 @@ struct SiteViewState: Codable {
 	var enabledBands: [Int]?
 	var showGround: Bool?
 	var enabledKinds: [String]?
+	var trailFadeFraction: Double?
 
 	static func load(slug: String) -> SiteViewState {
 		guard let data = UserDefaults.standard.data(forKey: key(slug)),

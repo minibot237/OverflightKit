@@ -7,6 +7,7 @@ struct MapPane: NSViewRepresentable {
 
 	final class BandMultiPolyline: MKMultiPolyline {
 		var segmentClass: SegmentClass = .unknownAlt
+		var fadeAlpha: CGFloat = 1
 	}
 
 	final class ParcelAnnotation: MKPointAnnotation {}
@@ -70,7 +71,7 @@ struct MapPane: NSViewRepresentable {
 		coord.model = model
 		if coord.overlayRevision != model.mapRevision {
 			coord.overlayRevision = model.mapRevision
-			coord.rebuildTrackOverlays(map, segments: model.segmentsByClass, heads: model.trackHeads)
+			coord.rebuildTrackOverlays(map, segments: model.trackSegments, heads: model.trackHeads)
 		}
 		if !model.isRemote {
 			coord.syncParcel(map, lat: model.parcelLat, lon: model.parcelLon, radiusM: model.parcelRadiusM)
@@ -148,22 +149,28 @@ struct MapPane: NSViewRepresentable {
 			layer.add(anim, forKey: "pulse")
 		}
 
-		func rebuildTrackOverlays(_ map: MKMapView, segments: [SegmentClass: [[CLLocationCoordinate2D]]], heads: [TrackHead]) {
+		func rebuildTrackOverlays(_ map: MKMapView, segments: [SegmentKey: [[CLLocationCoordinate2D]]], heads: [TrackHead]) {
 			map.removeAnnotations(map.annotations.filter { $0 is HeadAnnotation })
 			map.addAnnotations(heads.map(HeadAnnotation.init))
 			map.removeOverlays(map.overlays.filter { $0 is BandMultiPolyline })
 			// Draw order: ground first, then high bands down to low, so the
 			// low-altitude traffic — the interesting signal — sits on top.
+			// Within a class, oldest (faintest) fade buckets go under newest.
 			var order: [SegmentClass] = [.ground, .unknownAlt, .vessel, .train]
 			order += AltitudeBand.allCases.reversed().map { .band($0.rawValue) }
 			for cls in order {
-				guard let runs = segments[cls], !runs.isEmpty else { continue }
-				let polylines = runs.map { run in
-					MKPolyline(coordinates: run, count: run.count)
+				for bucket in (0..<ViewerModel.fadeBuckets).reversed() {
+					let key = SegmentKey(cls: cls, fadeBucket: bucket)
+					guard let runs = segments[key], !runs.isEmpty else { continue }
+					let polylines = runs.map { run in
+						MKPolyline(coordinates: run, count: run.count)
+					}
+					let multi = BandMultiPolyline(polylines)
+					multi.segmentClass = cls
+					// Bucket 0 fully opaque, ramping down to ~0.15 for the oldest.
+					multi.fadeAlpha = max(0.15, 1 - CGFloat(bucket) * 0.17)
+					map.addOverlay(multi, level: .aboveLabels)
 				}
-				let multi = BandMultiPolyline(polylines)
-				multi.segmentClass = cls
-				map.addOverlay(multi, level: .aboveLabels)
 			}
 		}
 
@@ -219,6 +226,7 @@ struct MapPane: NSViewRepresentable {
 				case .train:
 					r.strokeColor = Viz.mapTrain
 				}
+				r.alpha = multi.fadeAlpha
 				r.lineWidth = 2
 				return r
 			}
