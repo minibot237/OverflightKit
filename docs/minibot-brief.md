@@ -207,9 +207,13 @@ Record every verified fact back into this file (or the memory scope) with date.
   movers get fine cadence), keep on >=100m of movement, 10min keepalive
   stamp for anchored ships so they stay present in windows. All knobs in
   config: ais.min_interval_s / min_move_m / stamp_interval_s. Reconnects
-  back off to 5m. NOAA backfill proven: 2025-01-01 loaded, 7.34M vessel
-  rows straight to archive Parquet, queryable through the API (marine
-  queries want &gap=1800+).
+  back off to 5m. NOAA backfill proven and in use: 2025-01-01 plus
+  2025-12-25..31 loaded (~59M rows, Eric's Algiers Point request —
+  aisstream's NOLA volunteer receiver only feeds ~3-8am CT, NOAA-era
+  archive fills the gap). NOAA publishes ~7 months behind; no 2026 files
+  yet as of 2026-07-28. Marine queries want &gap=1800+; a full day of a
+  busy riverfront bbox hits the 200k row cap — shorter windows for full
+  fidelity.
 - Phase 6 - Rail, opportunistic. Amtrak + GTFS-RT adapters where feeds exist.
   STATUS 2026-07-25: Amtrak DONE and running (Amtraker, 60s, kind=train,
   ~57 trains/poll incl. VIA). MovementGate on writes (rail.min_move_m 25m,
